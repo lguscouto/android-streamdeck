@@ -24,19 +24,22 @@ defaults are used.
 Set the environment variables before starting the entrypoint:
 
 ```bash
-export STREAMDECK_HOST=0.0.0.0
+export STREAMDECK_HOST=127.0.0.1
 export STREAMDECK_PORT=18766
 uv run streamdeck-server
 ```
 
-For a single invocation in a POSIX shell:
+Para uma única execução em shell POSIX:
 
 ```bash
 STREAMDECK_HOST=127.0.0.1 STREAMDECK_PORT=18766 uv run streamdeck-server
 ```
 
-`STREAMDECK_PORT` must be an integer from `1` to `65535`. The
-`STREAMDECK_HOST` value is passed directly to Uvicorn.
+`STREAMDECK_PORT` deve ser um inteiro de `1` a `65535`. O valor de
+`STREAMDECK_HOST` é encaminhado ao Uvicorn. O padrão `127.0.0.1` é intencional:
+a Fase 1 ainda não possui pareamento nem autenticação para proteger alterações
+vindas da rede. Não use `0.0.0.0` ou outro bind remoto em uma rede não confiável;
+essa exposição será documentada novamente somente após a Fase 2.
 
 The file `.env.example` documents the bind variables, but it is only an
 example and is **not loaded automatically**. Export or set the variables in

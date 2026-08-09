@@ -189,6 +189,66 @@ def test_snapshot_rejects_invalid_revision_with_sanitized_422(tmp_path: Path) ->
     }
 
 
+def test_put_requires_expected_revision(tmp_path: Path) -> None:
+    response = request(
+        make_seeded_app(tmp_path),
+        "PUT",
+        "/api/v1/profiles/default",
+        json_body=updated_profile_payload(),
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "code": "VALIDATION_ERROR",
+        "message": "Request validation failed",
+        "retryable": False,
+    }
+
+
+def test_app_restart_keeps_user_edited_profile(tmp_path: Path) -> None:
+    database_path = tmp_path / "streamdeck.sqlite3"
+    first_app = create_app(Settings(database_path=database_path))
+    updated = request(
+        first_app,
+        "PUT",
+        "/api/v1/profiles/default?expected_revision=1",
+        json_body=updated_profile_payload(),
+    )
+    assert updated.status_code == 200
+
+    second_app = create_app(Settings(database_path=database_path))
+    current = request(second_app, "GET", "/api/v1/profiles/default/snapshot")
+
+    assert current.status_code == 200
+    assert current.json()["revision"] == 2
+    assert current.json()["pages"][0]["buttons"][0]["title"] == (
+        "Atalho atualizado"
+    )
+
+
+def test_broadcast_failure_does_not_hide_committed_update(tmp_path: Path) -> None:
+    class FailingBroadcast:
+        async def broadcast_profile_changed(
+            self, _profile_id: str, _revision: int, *, reason: str
+        ) -> None:
+            raise RuntimeError(reason)
+
+    app = make_seeded_app(tmp_path, websocket_manager=FailingBroadcast())
+    response = request(
+        app,
+        "PUT",
+        "/api/v1/profiles/default?expected_revision=1",
+        json_body=updated_profile_payload(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["revision"] == 2
+    assert (
+        request(app, "GET", "/api/v1/profiles/default/snapshot").json()["revision"]
+        == 2
+    )
+
+
 def test_action_catalog_is_exactly_closed_and_contains_no_command_surface(
     tmp_path: Path,
 ) -> None:

@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from app.api import create_router, register_exception_handlers
 from app.config import Settings
 from app.db import Database
-from app.repositories.profiles import ProfileRepository
+from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
 from app.schemas import Profile
 
 SERVICE_NAME = "android-streamdeck-server"
@@ -44,7 +44,10 @@ def create_app(
         database = Database(runtime_settings.database_path)
         repository = ProfileRepository(database)
         repository.initialize()
-        repository.seed_profile(_load_default_profile())
+        try:
+            repository.get_profile("default")
+        except ProfileNotFoundError:
+            repository.seed_profile(_load_default_profile())
     else:
         database = getattr(repository, "database", None)
 

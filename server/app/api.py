@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, FastAPI, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -14,11 +16,12 @@ from app.repositories.profiles import (
     ProfileRepository,
     ProfileRevisionNotFoundError,
 )
-from app.schemas import Profile
+from app.schemas import Profile, StableId
 
 API_PREFIX = "/api/v1"
 ACTION_TYPES = ("hotkey", "key", "media", "text", "url", "application")
 ACTION_CATALOG = {"actions": [{"type": action_type} for action_type in ACTION_TYPES]}
+LOGGER = logging.getLogger(__name__)
 
 
 class APIError(Exception):
@@ -93,7 +96,7 @@ def create_router(
 
     @router.get("/profiles/{profile_id}/snapshot")
     def get_profile_snapshot(
-        profile_id: str,
+        profile_id: StableId,
         revision: int | None = Query(default=None, ge=1),
     ) -> JSONResponse:
         profile = _safe_call(repository.get_profile, profile_id, revision)
@@ -105,9 +108,9 @@ def create_router(
 
     @router.put("/profiles/{profile_id}")
     async def put_profile(
-        profile_id: str,
+        profile_id: StableId,
         profile: Profile,
-        expected_revision: int | None = Query(default=None, ge=1),
+        expected_revision: int = Query(..., ge=1),
     ) -> JSONResponse:
         if profile.id != profile_id:
             raise APIError(
@@ -116,7 +119,8 @@ def create_router(
                 "Request validation failed",
                 False,
             )
-        saved = _safe_call(
+        saved = await run_in_threadpool(
+            _safe_call,
             repository.save_profile,
             profile,
             expected_revision=expected_revision,
@@ -127,8 +131,12 @@ def create_router(
             if broadcaster is not None:
                 try:
                     await broadcaster(saved.id, saved.revision, reason="updated")
-                except Exception as exc:
-                    raise _internal_error() from exc
+                except Exception:
+                    LOGGER.warning(
+                        "profile change broadcast failed for profile %s revision %s",
+                        saved.id,
+                        saved.revision,
+                    )
         return JSONResponse(content=saved.to_wire())
 
     return router
