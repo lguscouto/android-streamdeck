@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 from referencing import Registry, Resource
 
 from app.schemas import (
+    HTTPS_URL_PATTERN,
     AckPayload,
     Button,
     ErrorPayload,
@@ -260,14 +261,22 @@ def test_url_action_schema_matches_shared_contract() -> None:
     ]["url"]
 
     assert url_schema["format"] == "uri"
-    assert url_schema["pattern"] == (
-        r"^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
-        r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*"
-        r"(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|"
-        r"65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?"
-        r"(?:[/?#][^\s\\\x00-\x1F\x7F-\x9F]*)?$"
-    )
+    assert url_schema["pattern"] == HTTPS_URL_PATTERN
     assert shared_url_schema["pattern"] == url_schema["pattern"]
+
+
+@pytest.mark.parametrize("suffix", ["\n", "\r\n"])
+def test_url_action_rejects_trailing_newlines_in_runtime_and_shared_schema(
+    suffix: str,
+) -> None:
+    url = f"https://example.com{suffix}"
+
+    with pytest.raises(ValidationError):
+        UrlAction(type="url", url=url)
+
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {"type": "url", "url": url}
+    assert list(profile_schema_validator().iter_errors(profile))
 
 
 def test_generated_schema_declares_unique_items_for_unique_lists() -> None:
@@ -352,7 +361,32 @@ def test_url_action_rejects_invalid_https_ports(url: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "url", ["https://example.com", "https://example.com:1", "https://example.com:65535"]
+    "url",
+    [
+        "https://example.com:01",
+        "https://example.com:00080",
+        "https://example.com:065535",
+    ],
+)
+def test_url_action_rejects_noncanonical_https_ports_in_runtime_and_schema(
+    url: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        UrlAction(type="url", url=url)
+
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {"type": "url", "url": url}
+    assert list(profile_schema_validator().iter_errors(profile))
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com",
+        "https://example.com:1",
+        "https://example.com:80",
+        "https://example.com:65535",
+    ],
 )
 def test_url_action_accepts_valid_https_port_boundaries(url: str) -> None:
     profile = profile_with_single_button()
@@ -360,6 +394,31 @@ def test_url_action_accepts_valid_https_port_boundaries(url: str) -> None:
 
     Profile.model_validate(profile)
     assert not list(profile_schema_validator().iter_errors(profile))
+
+
+def test_url_action_enforces_dns_label_and_hostname_length_limits() -> None:
+    valid_hostname = ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 61])
+    invalid_hostname = ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 62])
+    too_long_label = f"{'a' * 64}.com"
+
+    for hostname in [valid_hostname]:
+        UrlAction(type="url", url=f"https://{hostname}")
+        profile = profile_with_single_button()
+        profile["pages"][0]["buttons"][0]["action"] = {
+            "type": "url",
+            "url": f"https://{hostname}",
+        }
+        assert not list(profile_schema_validator().iter_errors(profile))
+
+    for hostname in [invalid_hostname, too_long_label]:
+        with pytest.raises(ValidationError):
+            UrlAction(type="url", url=f"https://{hostname}")
+        profile = profile_with_single_button()
+        profile["pages"][0]["buttons"][0]["action"] = {
+            "type": "url",
+            "url": f"https://{hostname}",
+        }
+        assert list(profile_schema_validator().iter_errors(profile))
 
 
 def test_duplicate_hotkey_modifiers_are_rejected() -> None:
@@ -482,14 +541,35 @@ def test_profile_wire_omits_none_after_nested_model_copy_update() -> None:
     page = profile.pages[0].model_copy(update={"buttons": [button]})
     profile = profile.model_copy(update={"pages": [page]})
 
-    wire = profile.to_wire()
-    wire_button = wire["pages"][0]["buttons"][0]
-
     assert "color" in button.model_fields_set
     assert button.color is None
-    assert "color" not in wire_button
-    assert "color" not in json.loads(profile.to_wire_json())["pages"][0]["buttons"][0]
-    _assert_wire_contains_no_nulls(wire)
+
+    with pytest.raises(ValidationError):
+        profile.to_wire()
+    with pytest.raises(ValidationError):
+        profile.to_wire_json()
+
+
+def test_direct_invalid_assignment_is_rejected_before_wire_serialization() -> None:
+    profile = Profile.model_validate(profile_with_single_button())
+    button = profile.pages[0].buttons[0]
+
+    with pytest.raises(ValidationError):
+        button.color = "not-a-color"
+
+
+def test_wire_revalidation_rejects_model_copy_updated_shell_action() -> None:
+    profile = Profile.model_validate(profile_with_single_button())
+    button = profile.pages[0].buttons[0].model_copy(
+        update={"action": {"type": "shell", "command": "not-allowed"}}
+    )
+    page = profile.pages[0].model_copy(update={"buttons": [button]})
+    profile = profile.model_copy(update={"pages": [page]})
+
+    with pytest.raises(ValidationError):
+        profile.to_wire()
+    with pytest.raises(ValidationError):
+        profile.to_wire_json()
 
 
 def wire_message_examples() -> list[dict[str, object]]:
@@ -686,6 +766,30 @@ def test_local_draft_2020_12_registry_validates_profile_reference_without_networ
 
     assert not profile_errors
     assert not message_errors
+
+
+def test_draft_2020_12_accepts_text_and_application_actions() -> None:
+    profile = profile_with_single_button()
+    page = profile["pages"][0]
+    page["columns"] = 2
+    page["buttons"] = [
+        {
+            "id": "text-button",
+            "row": 0,
+            "column": 0,
+            "title": "Texto",
+            "action": {"type": "text", "text": "Olá"},
+        },
+        {
+            "id": "application-button",
+            "row": 0,
+            "column": 1,
+            "title": "Aplicativo",
+            "action": {"type": "application", "app_id": "calculator"},
+        },
+    ]
+
+    assert not list(profile_schema_validator().iter_errors(profile))
 
 
 @pytest.mark.parametrize(

@@ -42,27 +42,37 @@ HTTPS_PORT_PATTERN = (
     r"(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|"
     r"65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])"
 )
-HOST_PATTERN = (
-    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
-    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*"
-)
+HOST_LABEL_PATTERN = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+HOST_PATTERN = rf"{HOST_LABEL_PATTERN}(?:\.{HOST_LABEL_PATTERN})*"
 HTTPS_URL_PATTERN = (
-    rf"^https://{HOST_PATTERN}"
+    rf"^https://(?=[A-Za-z0-9.-]{{1,253}}(?::{HTTPS_PORT_PATTERN})?"
+    rf"(?:[/?#]|$)){HOST_PATTERN}"
     rf"(?::{HTTPS_PORT_PATTERN})?"
-    r"(?:[/?#][^\s\\\x00-\x1F\x7F-\x9F]*)?$"
+    r"(?:[/?#][^\s\\\x00-\x1F\x7F-\x9F]*)?$(?![\s\S])"
 )
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        validate_assignment=True,
+        regex_engine="python-re",
+    )
+
+    def _validated_for_wire(self) -> StrictModel:
+        data = self.model_dump(mode="python", exclude_unset=True, warnings="none")
+        return type(self).model_validate(data)
 
     def to_wire(self) -> dict[str, object]:
         """Serialize this protocol model for transmission without unset fields."""
-        return self.model_dump(mode="json", exclude_unset=True, exclude_none=True)
+        validated = self._validated_for_wire()
+        return validated.model_dump(mode="json", exclude_unset=True, exclude_none=True)
 
     def to_wire_json(self) -> str:
         """Serialize this protocol model as wire JSON without unset fields."""
-        return self.model_dump_json(exclude_unset=True, exclude_none=True)
+        validated = self._validated_for_wire()
+        return validated.model_dump_json(exclude_unset=True, exclude_none=True)
 
 
 Modifier = Literal["ctrl", "alt", "shift", "win"]
@@ -124,6 +134,8 @@ class UrlAction(StrictModel):
     @field_validator("url")
     @classmethod
     def require_https_url(cls, url: str) -> str:
+        if not re.fullmatch(HTTPS_URL_PATTERN, url, flags=re.ASCII):
+            raise ValueError("url must be a valid HTTPS URL")
         if not url.startswith("https://"):
             raise ValueError("url must use https")
         if any(character.isspace() for character in url):
@@ -143,14 +155,20 @@ class UrlAction(StrictModel):
             raise ValueError("url must be a valid HTTPS URL")
         if any(bracket in parsed.netloc for bracket in "[]"):
             raise ValueError("IPv6 hosts are not allowed in v1 URLs")
+        if len(parsed.hostname) > 253:
+            raise ValueError("url hostname must be at most 253 characters")
         if not re.fullmatch(HOST_PATTERN, parsed.hostname, flags=re.ASCII):
             raise ValueError("url hostname must use strict ASCII DNS syntax")
         if parsed.netloc.endswith(":"):
             raise ValueError("url port must not be empty")
         if parsed.username is not None or parsed.password is not None:
             raise ValueError("url userinfo is not allowed")
-        if port is not None and not 1 <= port <= 65535:
-            raise ValueError("url port must be between 1 and 65535")
+        if port is not None:
+            raw_port = parsed.netloc.rsplit(":", 1)[1]
+            if raw_port != str(port):
+                raise ValueError("url port must use canonical decimal notation")
+            if not 1 <= port <= 65535:
+                raise ValueError("url port must be between 1 and 65535")
         return url
 
 

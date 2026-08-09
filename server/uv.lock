@@ -16,6 +16,7 @@ dev = [
     { name = "httpx" },
     { name = "jsonschema" },
     { name = "pytest" },
+    { name = "referencing" },
     { name = "ruff" },
 ]
 
@@ -30,6 +31,7 @@ dev = [
     { name = "httpx", specifier = ">=0.28,<1.0" },
     { name = "jsonschema", specifier = ">=4.23,<5.0" },
     { name = "pytest", specifier = ">=8.4,<9.0" },
+    { name = "referencing", specifier = ">=0.36,<1.0" },
     { name = "ruff", specifier = ">=0.12,<1.0" },
 ]
 
