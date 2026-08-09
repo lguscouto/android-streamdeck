@@ -2,3 +2,6 @@
 *.egg-info/
 build/
 dist/
+
+# Runtime SQLite data must remain local and untracked.
+/data/
