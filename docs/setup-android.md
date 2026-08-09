@@ -160,6 +160,31 @@ A matriz abaixo é a referência inicial para o desenvolvimento. “Fato verific
 | Servidor | Python `3.14.6` e uv `0.11.21` encontrados | Python `3.14.6` com uv `0.11.21`, FastAPI/WebSocket, host `127.0.0.1` e porta `8765` no desenvolvimento; testar LAN antes de mudar o host |
 | Grade do painel | Tamanho e densidade do A10 ainda não medidos | Default configurável de 3 colunas x 5 linhas |
 
+## Destino oficial de validação Android
+
+A validação funcional e visual desta primeira implementação será feita no AVD **`Pixel_8`**, que está cadastrado no Android Emulator local. O A10 continua sendo o aparelho-alvo de compatibilidade futura, mas não será usado como bloqueio para o desenvolvimento nem será declarado validado sem uma execução posterior.
+
+## Estado verificado do AVD de validação
+
+O AVD foi iniciado e respondeu a `adb` com os seguintes valores reais:
+
+- destino: `emulator-5554`;
+- modelo reportado: `sdk_gphone16k_x86_64`;
+- API: `37`;
+- resolução física: `1080x2400`;
+- densidade: `420`.
+
+Esses dados descrevem o emulador Pixel_8 e não o Galaxy A10.
+
+Para iniciar o destino de teste:
+
+```bash
+SDK='/c/Users/gustavo/AppData/Local/Android/Sdk'
+"$SDK/emulator/emulator.exe" -avd Pixel_8 -no-snapshot-load
+```
+
+Depois, aguardar `sys.boot_completed=1`, confirmar `adb devices` e repetir a validação no APK final. A automação da interface nativa Compose deverá usar ADB/UiAutomator; o fluxo CDP de WebView não se aplica a este app nativo.
+
 ## Recomendação provisória para o desenvolvimento
 
 - Usar explicitamente o JBR 21 do Android Studio em comandos e configurações locais. O caminho confirmado é `C:\Program Files\Android\Android Studio\jbr\bin\java.exe` (ou `/c/Program Files/Android/Android Studio/jbr/bin/java.exe` no MSYS).

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Android Stream Deck</string>
+    <string name="app_title">Android Stream Deck</string>
+    <string name="app_subtitle">Esqueleto inicial do aplicativo</string>
+    <string name="server_not_connected">Servidor ainda não conectado</string>
+</resources>
