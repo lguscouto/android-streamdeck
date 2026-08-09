@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from app.config import Settings
 from app.db import Database
 from app.main import create_app
 from app.repositories.profiles import ProfileRepository
-from app.websocket import WebSocketManager
+from app.websocket import ClientSession, WebSocketManager
 
 
 def make_repository(tmp_path: Path) -> ProfileRepository:
@@ -201,6 +202,62 @@ def test_websocket_press_rejects_stale_revision_and_unknown_button(
     assert "sqlite" not in str(stale).lower()
 
 
+def test_websocket_retryable_conflict_is_not_cached(tmp_path: Path) -> None:
+    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/v1/ws") as websocket:
+            websocket.send_json(hello_message())
+            websocket.receive_json()
+            websocket.receive_json()
+            press = {
+                "protocol_version": 1,
+                "type": "press",
+                "payload": {
+                    "request_id": "retry-conflict",
+                    "profile_id": "default",
+                    "page_id": "main",
+                    "button_id": "save-shortcut",
+                    "revision": 99,
+                },
+            }
+            websocket.send_json(press)
+            conflict = websocket.receive_json()
+
+            payload = client.get("/api/v1/profile").json()
+            payload["revision"] = 2
+            response = client.put(
+                "/api/v1/profiles/default?expected_revision=1", json=payload
+            )
+            assert response.status_code == 200
+            assert websocket.receive_json()["type"] == "profile_changed"
+
+            press["payload"]["revision"] = 2
+            websocket.send_json(press)
+            retry = websocket.receive_json()
+
+    assert conflict["payload"]["code"] == "PROFILE_REVISION_CONFLICT"
+    assert retry["type"] == "ack"
+
+
+def test_websocket_slow_broadcast_connection_is_removed(tmp_path: Path) -> None:
+    class SlowWebSocket:
+        async def send_text(self, message: str) -> None:
+            await asyncio.sleep(1)
+
+    async def exercise() -> int:
+        repository = make_repository(tmp_path)
+        manager = WebSocketManager(repository, send_timeout=0.01)
+        websocket = SlowWebSocket()
+        await manager.register(
+            websocket,
+            ClientSession(client_id="slow", profile_id="default", ready=True),
+        )
+        await manager.broadcast_profile_changed("default", 2)
+        return manager.connection_count
+
+    assert asyncio.run(exercise()) == 0
+
+
 def test_websocket_press_cannot_target_another_session_profile(
     tmp_path: Path,
 ) -> None:
@@ -318,6 +375,32 @@ def test_websocket_handshake_timeout_is_structured(tmp_path: Path) -> None:
         "message": "WebSocket handshake timed out",
         "retryable": True,
     }
+
+
+def test_websocket_handshake_deadline_includes_profile_load(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    repository = seeded_app.state.profile_repository
+    original = repository.get_active_profile
+
+    def slow_get_active_profile():
+        time.sleep(0.1)
+        return original()
+
+    monkeypatch.setattr(repository, "get_active_profile", slow_get_active_profile)
+    manager = WebSocketManager(repository, handshake_timeout=0.03)
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+        websocket_manager=manager,
+    )
+    with TestClient(app).websocket_connect("/api/v1/ws") as websocket:
+        websocket.send_json(hello_message())
+        response = websocket.receive_json()
+
+    assert response["payload"]["code"] == "HANDSHAKE_TIMEOUT"
 
 
 def test_websocket_idle_timeout_is_structured(tmp_path: Path) -> None:

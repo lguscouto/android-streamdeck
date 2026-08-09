@@ -34,6 +34,9 @@ SERVER_ID = "windows-server"
 SERVER_VERSION = "0.1.0"
 DEFAULT_HANDSHAKE_TIMEOUT = 5.0
 DEFAULT_IDLE_TIMEOUT = 60.0
+DEFAULT_SEND_TIMEOUT = 1.0
+MAX_CONNECTIONS = 32
+MAX_FRAME_BYTES = 256 * 1024
 MAX_CACHED_RESPONSES = 256
 
 
@@ -56,6 +59,16 @@ async def _send_session_text(
         await websocket.send_text(message)
 
 
+async def _close_handshake_timeout(websocket: WebSocket) -> None:
+    await _send_error(
+        websocket,
+        "HANDSHAKE_TIMEOUT",
+        "WebSocket handshake timed out",
+        retryable=True,
+    )
+    await websocket.close(code=1008)
+
+
 class WebSocketManager:
     """Track connected clients and broadcast validated protocol events."""
 
@@ -67,19 +80,27 @@ class WebSocketManager:
         server_version: str = SERVER_VERSION,
         handshake_timeout: float = DEFAULT_HANDSHAKE_TIMEOUT,
         idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
+        send_timeout: float = DEFAULT_SEND_TIMEOUT,
+        max_connections: int = MAX_CONNECTIONS,
     ) -> None:
         self.repository = repository
         self.server_id = server_id
         self.server_version = server_version
         self.handshake_timeout = handshake_timeout
         self.idle_timeout = idle_timeout
+        self.send_timeout = send_timeout
+        self.max_connections = max_connections
         self._sessions: dict[WebSocket, ClientSession] = {}
+        self._broadcast_lock = asyncio.Lock()
+        self._last_broadcast_revision: dict[str, int] = {}
 
     @property
     def connection_count(self) -> int:
         return len(self._sessions)
 
     async def register(self, websocket: WebSocket, session: ClientSession) -> None:
+        if self.connection_count >= self.max_connections:
+            raise RuntimeError("websocket connection limit reached")
         self._sessions[websocket] = session
 
     async def unregister(self, websocket: WebSocket) -> None:
@@ -92,29 +113,55 @@ class WebSocketManager:
         *,
         reason: str = "updated",
     ) -> None:
-        message = ProfileChangedMessage(
-            protocol_version=1,
-            type="profile_changed",
-            payload={
-                "profile_id": profile_id,
-                "revision": revision,
-                "reason": reason,
-            },
-        ).to_wire_json()
-        stale: list[WebSocket] = []
-        for websocket, session in tuple(self._sessions.items()):
-            if session.profile_id != profile_id:
-                continue
-            async with session.send_lock:
-                if not session.ready:
-                    session.pending_messages.append(message)
-                    continue
-                try:
-                    await websocket.send_text(message)
-                except Exception:
-                    stale.append(websocket)
+        async with self._broadcast_lock:
+            if revision <= self._last_broadcast_revision.get(profile_id, 0):
+                return
+            self._last_broadcast_revision[profile_id] = revision
+            message = ProfileChangedMessage(
+                protocol_version=1,
+                type="profile_changed",
+                payload={
+                    "profile_id": profile_id,
+                    "revision": revision,
+                    "reason": reason,
+                },
+            ).to_wire_json()
+            targets = [
+                (websocket, session)
+                for websocket, session in tuple(self._sessions.items())
+                if session.profile_id == profile_id
+            ]
+            results = await asyncio.gather(
+                *(
+                    self._send_broadcast(websocket, session, message)
+                    for websocket, session in targets
+                )
+            )
+            stale = [
+                websocket
+                for (websocket, _), failed in zip(targets, results, strict=True)
+                if failed
+            ]
         for websocket in stale:
             await self.unregister(websocket)
+
+    async def _send_broadcast(
+        self,
+        websocket: WebSocket,
+        session: ClientSession,
+        message: str,
+    ) -> bool:
+        async with session.send_lock:
+            if not session.ready:
+                session.pending_messages.append(message)
+                return False
+            try:
+                await asyncio.wait_for(
+                    websocket.send_text(message), timeout=self.send_timeout
+                )
+            except Exception:
+                return True
+        return False
 
 
 def _error_message(
@@ -156,15 +203,22 @@ async def _send_error(
     return wire
 
 
-async def _send_invalid_message(websocket: WebSocket) -> None:
+async def _send_invalid_message(
+    websocket: WebSocket,
+    *,
+    session: ClientSession | None = None,
+) -> None:
     await _send_error(
         websocket,
         "INVALID_MESSAGE",
         "Invalid WebSocket message",
+        session=session,
     )
 
 
 def _parse_message(raw_message: str) -> Any | None:
+    if len(raw_message.encode("utf-8")) > MAX_FRAME_BYTES:
+        return None
     try:
         return MessageAdapter.validate_json(raw_message)
     except (ValidationError, ValueError, TypeError):
@@ -233,7 +287,7 @@ async def _handle_press(
         return
 
     if profile.revision != message.payload.revision:
-        wire = await _send_error(
+        await _send_error(
             websocket,
             "PROFILE_REVISION_CONFLICT",
             "Profile revision conflict",
@@ -241,7 +295,6 @@ async def _handle_press(
             retryable=True,
             session=session,
         )
-        _cache_response(session, request_id, wire)
         return
 
     page = next(
@@ -308,19 +361,14 @@ async def _serve_websocket(
 ) -> None:
     await websocket.accept()
     session: ClientSession | None = None
+    handshake_started = asyncio.get_running_loop().time()
     try:
         try:
             raw_hello = await asyncio.wait_for(
                 websocket.receive_text(), timeout=manager.handshake_timeout
             )
         except asyncio.TimeoutError:
-            await _send_error(
-                websocket,
-                "HANDSHAKE_TIMEOUT",
-                "WebSocket handshake timed out",
-                retryable=True,
-            )
-            await websocket.close(code=1008)
+            await _close_handshake_timeout(websocket)
             return
         except WebSocketDisconnect:
             return
@@ -331,11 +379,23 @@ async def _serve_websocket(
             await websocket.close(code=1002)
             return
 
+        remaining_handshake = manager.handshake_timeout - (
+            asyncio.get_running_loop().time() - handshake_started
+        )
+        if remaining_handshake <= 0:
+            await _close_handshake_timeout(websocket)
+            return
         try:
-            profile = await _load_requested_profile(
-                repository,
-                hello.payload.requested_profile_id,
+            profile = await asyncio.wait_for(
+                _load_requested_profile(
+                    repository,
+                    hello.payload.requested_profile_id,
+                ),
+                timeout=remaining_handshake,
             )
+        except asyncio.TimeoutError:
+            await _close_handshake_timeout(websocket)
+            return
         except ProfileNotFoundError:
             await _send_error(
                 websocket,
@@ -354,7 +414,17 @@ async def _serve_websocket(
             client_id=hello.payload.client_id,
             profile_id=profile.id,
         )
-        await manager.register(websocket, session)
+        try:
+            await manager.register(websocket, session)
+        except RuntimeError:
+            await _send_error(
+                websocket,
+                "CONNECTION_LIMIT",
+                "WebSocket connection limit reached",
+                retryable=True,
+            )
+            await websocket.close(code=1013)
+            return
         welcome_wire = WelcomeMessage(
             protocol_version=1,
             type="welcome",
@@ -398,7 +468,9 @@ async def _serve_websocket(
                 return
 
             message = _parse_message(raw_message)
-            if isinstance(message, PingMessage):
+            if message is None:
+                await _send_invalid_message(websocket, session=session)
+            elif isinstance(message, PingMessage):
                 await _send_session_text(
                     websocket,
                     session,
