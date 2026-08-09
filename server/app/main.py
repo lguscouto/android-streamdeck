@@ -1,10 +1,23 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from app.api import create_router, register_exception_handlers
 from app.config import Settings
+from app.db import Database
+from app.repositories.profiles import ProfileRepository
+from app.schemas import Profile
 
 SERVICE_NAME = "android-streamdeck-server"
 PROTOCOL_VERSION = "0.1"
+DEFAULT_PROFILE_PATH = (
+    Path(__file__).resolve().parents[2] / "shared" / "fixtures" / "default-profile.json"
+)
 
 
 class HealthResponse(BaseModel):
@@ -13,11 +26,35 @@ class HealthResponse(BaseModel):
     protocol_version: str
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
-    """Create the FastAPI application without exposing runtime secrets."""
+def _load_default_profile() -> Profile:
+    payload = json.loads(DEFAULT_PROFILE_PATH.read_text(encoding="utf-8"))
+    return Profile.model_validate(payload)
+
+
+def create_app(
+    settings: Settings | None = None,
+    repository: ProfileRepository | None = None,
+    websocket_manager: Any = None,
+) -> FastAPI:
+    """Create the FastAPI application with optional persistence dependencies."""
     runtime_settings = settings or Settings.from_env()
+    database: Database | None
+
+    if repository is None:
+        database = Database(runtime_settings.database_path)
+        repository = ProfileRepository(database)
+        repository.initialize()
+        repository.seed_profile(_load_default_profile())
+    else:
+        database = getattr(repository, "database", None)
+
     application = FastAPI(title=SERVICE_NAME, version=PROTOCOL_VERSION)
     application.state.settings = runtime_settings
+    application.state.database = database
+    application.state.profile_repository = repository
+    application.state.websocket_manager = websocket_manager
+    register_exception_handlers(application)
+    application.include_router(create_router(repository, websocket_manager))
 
     @application.get("/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:
