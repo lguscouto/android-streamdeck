@@ -50,7 +50,7 @@ Esta matriz separa o inventário verificado no host das escolhas provisórias pa
 - **Stack:** Python, FastAPI e WebSocket.
 - **Persistência:** SQLite local para catálogo/configuração das ações, preferências mínimas e histórico estritamente necessário. O arquivo do banco é dado de runtime e deve permanecer fora do Git.
 - **Contratos:** mensagens WebSocket e endpoints auxiliares devem usar esquemas explícitos, validar tipos, limites e identificadores, e retornar erros estruturados.
-- **Execução:** cada ação é um adaptador registrado no servidor, com código próprio e parâmetros permitidos. O servidor devolve confirmação de recebimento e atualizações de progresso/resultado quando aplicável.
+- **Execução:** cada ação é um adaptador registrado no servidor, com código próprio e parâmetros permitidos. Na primeira fatia da Fase 3, somente `hotkey` está habilitada: o adaptador Windows converte modificadores e teclas de um mapa explícito de virtual keys em eventos `keybd_event`, sem shell ou subprocesso. `media`, `text`, `url`, `key` e `application` permanecem rejeitadas até receberem adaptadores específicos e testados.
 
 ## Rede local e autenticação
 
@@ -84,11 +84,12 @@ Esse limite é parte do contrato da arquitetura e deve ser preservado em testes,
 ## Fluxo principal
 
 1. O Android configura o endereço e abre o WebSocket.
-2. O servidor autentica/valida a sessão conforme o mecanismo adotado e envia o catálogo de ações permitidas.
-3. O usuário toca em um botão.
-4. O cliente envia um evento estruturado com `action_id`, identificador da solicitação e payload validado.
-5. O servidor valida o envelope e o schema da ação, registra o início e executa somente o adaptador correspondente.
-6. Eventos de estado retornam pelo WebSocket; o Android atualiza o botão e apresenta sucesso ou erro.
+2. O servidor autentica/valida a sessão e envia o snapshot do perfil selecionado.
+3. O usuário toca em um botão da página ativa.
+4. O cliente envia `press` com `request_id`, perfil, página, botão e revisão.
+5. O servidor valida o envelope, a sessão, a revisão e a ação fechada do botão.
+6. O adaptador habilitado devolve `ack` como `completed` ou `rejected`; o cliente
+   atualiza o estado visual do botão.
 
 ## Evolução prevista
 

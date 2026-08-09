@@ -106,6 +106,17 @@ Falhas usam sempre a forma sanitizada:
 
 O servidor não executa shell, `command`, `subprocess` ou ações arbitrárias.
 
+## Execução de ações — primeira fatia da Fase 3
+
+O registry do servidor está fechado. Nesta etapa, somente a ação `hotkey` possui
+adaptador ativo: modificadores e tecla são transformados por um mapa interno de
+virtual keys e emitidos no Windows por `keybd_event`. Nenhum comando de shell,
+caminho ou argumento livre é montado a partir do cliente.
+
+As ações `key`, `media`, `text`, `url` e `application` continuam sem adaptador e
+recebem `ack` com `status: "rejected"`. Elas só serão habilitadas com contratos e
+testes específicos nas próximas fatias.
+
 ## WebSocket e limites
 
 Handshake normal:
@@ -113,7 +124,8 @@ Handshake normal:
 1. cliente envia `hello` com identidade, versão, `[1]` e token;
 2. servidor responde `welcome` e `profile_snapshot`;
 3. `ping` recebe `pong` com o mesmo `nonce`;
-4. `press` valida o perfil/página/botão e, nesta fase, ainda retorna `rejected`;
+4. `press` para uma `hotkey` permitida retorna `ack/completed`; tipos sem
+   adaptador retornam `ack/rejected`, preservando a idempotência do `request_id`;
 5. alterações HTTP geram `profile_changed` para sessões do mesmo perfil.
 
 Limites de transporte:

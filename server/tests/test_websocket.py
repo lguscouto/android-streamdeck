@@ -112,49 +112,169 @@ def test_websocket_ping_returns_same_nonce_as_pong(tmp_path: Path) -> None:
         }
 
 
-def test_websocket_valid_press_is_acknowledged_as_unavailable(tmp_path: Path) -> None:
-    with make_client(tmp_path).websocket_connect("/api/v1/ws") as websocket:
+def test_websocket_valid_press_executes_once_and_caches_completed_ack(
+    tmp_path: Path,
+) -> None:
+    from app.actions import ActionExecutionResult
+
+    class RecordingActionExecutor:
+        def __init__(self) -> None:
+            self.actions: list[object] = []
+
+        def execute(self, action: object) -> ActionExecutionResult:
+            self.actions.append(action)
+            return ActionExecutionResult("completed", "Action completed")
+
+    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    repository = seeded_app.state.profile_repository
+    action_executor = RecordingActionExecutor()
+    manager = WebSocketManager(repository, action_executor=action_executor)
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+        websocket_manager=manager,
+    )
+    press = {
+        "protocol_version": 1,
+        "type": "press",
+        "payload": {
+            "request_id": "press-1",
+            "profile_id": "default",
+            "page_id": "main",
+            "button_id": "save-shortcut",
+            "revision": 1,
+        },
+    }
+
+    with TestClient(app).websocket_connect("/api/v1/ws") as websocket:
         websocket.send_json(hello_message())
         websocket.receive_json()
         websocket.receive_json()
+        websocket.send_json(press)
+        response = websocket.receive_json()
+        websocket.send_json(press)
+        duplicate = websocket.receive_json()
 
-        websocket.send_json(
-            {
-                "protocol_version": 1,
-                "type": "press",
-                "payload": {
-                    "request_id": "press-1",
-                    "profile_id": "default",
-                    "page_id": "main",
-                    "button_id": "save-shortcut",
-                    "revision": 1,
-                },
-            }
-        )
+    assert response == {
+        "protocol_version": 1,
+        "type": "ack",
+        "payload": {
+            "request_id": "press-1",
+            "status": "completed",
+            "message": "Action completed",
+        },
+    }
+    assert duplicate == response
+    assert len(action_executor.actions) == 1
 
+
+def test_websocket_action_rejection_is_sanitized_and_cached(tmp_path: Path) -> None:
+    from app.actions import ActionExecutionRejected
+
+    class RejectingActionExecutor:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def execute(self, action: object) -> object:
+            self.call_count += 1
+            raise ActionExecutionRejected("Action type is not enabled")
+
+    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    repository = seeded_app.state.profile_repository
+    action_executor = RejectingActionExecutor()
+    manager = WebSocketManager(repository, action_executor=action_executor)
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+        websocket_manager=manager,
+    )
+    press = {
+        "protocol_version": 1,
+        "type": "press",
+        "payload": {
+            "request_id": "press-rejected",
+            "profile_id": "default",
+            "page_id": "main",
+            "button_id": "save-shortcut",
+            "revision": 1,
+        },
+    }
+
+    with TestClient(app).websocket_connect("/api/v1/ws") as websocket:
+        websocket.send_json(hello_message())
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json(press)
+        response = websocket.receive_json()
+        websocket.send_json(press)
+        duplicate = websocket.receive_json()
+
+    assert response == {
+        "protocol_version": 1,
+        "type": "ack",
+        "payload": {
+            "request_id": "press-rejected",
+            "status": "rejected",
+            "message": "Action type is not enabled",
+        },
+    }
+    assert duplicate == response
+    assert action_executor.call_count == 1
+
+
+def test_websocket_unexpected_action_failure_is_sanitized_and_keeps_session(
+    tmp_path: Path,
+) -> None:
+    class FailingActionExecutor:
+        def execute(self, action: object) -> object:
+            raise RuntimeError("C:/private/internal-action-detail")
+
+    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    repository = seeded_app.state.profile_repository
+    manager = WebSocketManager(repository, action_executor=FailingActionExecutor())
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+        websocket_manager=manager,
+    )
+    press = {
+        "protocol_version": 1,
+        "type": "press",
+        "payload": {
+            "request_id": "press-failed",
+            "profile_id": "default",
+            "page_id": "main",
+            "button_id": "save-shortcut",
+            "revision": 1,
+        },
+    }
+
+    with TestClient(app).websocket_connect("/api/v1/ws") as websocket:
+        websocket.send_json(hello_message())
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json(press)
         response = websocket.receive_json()
         websocket.send_json(
             {
                 "protocol_version": 1,
-                "type": "press",
-                "payload": {
-                    "request_id": "press-1",
-                    "profile_id": "default",
-                    "page_id": "main",
-                    "button_id": "save-shortcut",
-                    "revision": 1,
-                },
+                "type": "ping",
+                "payload": {"nonce": "after-action-failure"},
             }
         )
-        duplicate = websocket.receive_json()
+        pong = websocket.receive_json()
 
-    assert response["type"] == "ack"
-    assert response["payload"] == {
-        "request_id": "press-1",
-        "status": "rejected",
-        "message": "Action execution unavailable in phase 1",
+    assert response == {
+        "protocol_version": 1,
+        "type": "ack",
+        "payload": {
+            "request_id": "press-failed",
+            "status": "rejected",
+            "message": "Action could not be completed",
+        },
     }
-    assert duplicate == response
+    assert "internal-action-detail" not in str(response)
+    assert pong["type"] == "pong"
 
 
 def test_websocket_press_rejects_stale_revision_and_unknown_button(
@@ -203,7 +323,25 @@ def test_websocket_press_rejects_stale_revision_and_unknown_button(
 
 
 def test_websocket_retryable_conflict_is_not_cached(tmp_path: Path) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    from app.actions import ActionExecutionResult
+
+    class RecordingActionExecutor:
+        def __init__(self) -> None:
+            self.call_count = 0
+
+        def execute(self, action: object) -> ActionExecutionResult:
+            self.call_count += 1
+            return ActionExecutionResult("completed", "Action completed")
+
+    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    repository = seeded_app.state.profile_repository
+    action_executor = RecordingActionExecutor()
+    manager = WebSocketManager(repository, action_executor=action_executor)
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+        websocket_manager=manager,
+    )
     with TestClient(app) as client:
         with client.websocket_connect("/api/v1/ws") as websocket:
             websocket.send_json(hello_message())
@@ -237,6 +375,8 @@ def test_websocket_retryable_conflict_is_not_cached(tmp_path: Path) -> None:
 
     assert conflict["payload"]["code"] == "PROFILE_REVISION_CONFLICT"
     assert retry["type"] == "ack"
+    assert retry["payload"]["status"] == "completed"
+    assert action_executor.call_count == 1
 
 
 def test_websocket_slow_broadcast_connection_is_removed(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
+from app.actions import ActionExecutionRejected, ActionExecutor, ActionRegistry
 from app.pairing import PairingError, PairingService
 from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
 from app.schemas import (
@@ -85,6 +86,7 @@ class WebSocketManager:
         max_connections: int = MAX_CONNECTIONS,
         pairing_service: PairingService | None = None,
         require_auth: bool = False,
+        action_executor: ActionExecutor | None = None,
     ) -> None:
         self.repository = repository
         self.server_id = server_id
@@ -95,6 +97,7 @@ class WebSocketManager:
         self.max_connections = max_connections
         self.pairing_service = pairing_service
         self.require_auth = require_auth
+        self.action_executor = action_executor or ActionRegistry()
         self._sessions: dict[WebSocket, ClientSession] = {}
         self._broadcast_lock = asyncio.Lock()
         self._last_broadcast_revision: dict[str, int] = {}
@@ -246,6 +249,7 @@ async def _handle_press(
     websocket: WebSocket,
     repository: ProfileRepository,
     session: ClientSession,
+    action_executor: ActionExecutor,
     message: PressMessage,
 ) -> None:
     request_id = message.payload.request_id
@@ -340,15 +344,45 @@ async def _handle_press(
         _cache_response(session, request_id, wire)
         return
 
-    ack = AckMessage(
-        protocol_version=1,
-        type="ack",
-        payload=AckPayload(
-            request_id=request_id,
-            status="rejected",
-            message="Action execution unavailable in phase 1",
-        ),
-    ).to_wire_json()
+    try:
+        result = await run_in_threadpool(action_executor.execute, button.action)
+    except ActionExecutionRejected as exc:
+        ack = AckMessage(
+            protocol_version=1,
+            type="ack",
+            payload=AckPayload(
+                request_id=request_id,
+                status="rejected",
+                message=exc.public_message,
+            ),
+        ).to_wire_json()
+    except Exception:
+        ack = AckMessage(
+            protocol_version=1,
+            type="ack",
+            payload=AckPayload(
+                request_id=request_id,
+                status="rejected",
+                message="Action could not be completed",
+            ),
+        ).to_wire_json()
+    else:
+        ack = AckMessage(
+            protocol_version=1,
+            type="ack",
+            payload=AckPayload(
+                request_id=request_id,
+                status=result.status,
+                message=result.message,
+            ),
+        ).to_wire_json()
+        LOGGER.info(
+            "action_completed profile_id=%s page_id=%s button_id=%s action_type=%s",
+            profile.id,
+            page.id,
+            button.id,
+            button.action.type,
+        )
     _cache_response(session, request_id, ack)
     await _send_session_text(websocket, session, ack)
 
@@ -513,7 +547,13 @@ async def _serve_websocket(
                     ).to_wire_json()
                 )
             elif isinstance(message, PressMessage):
-                await _handle_press(websocket, repository, session, message)
+                await _handle_press(
+                    websocket,
+                    repository,
+                    session,
+                    manager.action_executor,
+                    message,
+                )
             else:
                 await _send_error(
                     websocket,

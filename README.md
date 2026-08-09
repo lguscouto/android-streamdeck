@@ -17,7 +17,8 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 
 ## Estado atual
 
-As **Fases 1 e 2** estão implementadas localmente.
+As **Fases 1 e 2** estão implementadas. A **Fase 3 está em andamento**, com a
+primeira fatia do servidor concluída.
 
 ### Fase 1 — servidor e contratos
 
@@ -42,7 +43,18 @@ As **Fases 1 e 2** estão implementadas localmente.
 - cleartext HTTP/WS permitido apenas no manifesto `debug`; o manifesto principal
   mantém `usesCleartextTraffic=false`.
 
-Acesso local padrão:
+### Fase 3 — execução controlada (em andamento)
+
+- registry interno fechado para ações;
+- primeira hotkey Windows via `keybd_event` e mapa explícito de teclas virtuais;
+- `press` válido recebe `ack` como `completed` ou `rejected` e mantém
+  idempotência por `request_id`;
+- `media`, `text`, `url`, `key` e `application` continuam rejeitadas até que
+  recebam adaptadores específicos, testados e seguros;
+- a grade Android e a validação E2E com o cliente permanecem nas próximas
+  fatias da Fase 3.
+
+### Acesso local padrão
 
 - Health: `http://127.0.0.1:8765/health`
 - API: `http://127.0.0.1:8765/api/v1`
@@ -51,9 +63,10 @@ Acesso local padrão:
 O bind padrão é loopback. O pareamento e a autenticação do WebSocket estão
 implementados, inclusive no cliente Android. O token Android é criptografado com
 AES-GCM por chave não exportável no Android Keystore e permanece vinculado ao
-endpoint que o emitiu. Adaptadores de execução de ações e a exposição operacional
-segura na LAN permanecem para as fases seguintes. Nesta fase, um `press` válido é
-reconhecido, mas retorna `rejected` porque a execução ainda não foi habilitada.
+endpoint que o emitiu. A primeira hotkey só é emitida pelo adaptador Windows a
+partir de teclas virtuais permitidas; não há shell, comando livre ou caminho
+recebido do cliente. A grade Android, os estados visuais de execução e o smoke
+integrado do cliente continuam como próximas fatias da Fase 3.
 
 Validação atual do servidor:
 
@@ -88,8 +101,9 @@ configurar uma base SQLite diferente, defina `STREAMDECK_DATABASE_PATH`; o
 padrão é `server/data/streamdeck.sqlite3`, ignorado pelo Git. Consulte
 [`server/README.md`](server/README.md) para o contrato HTTP e WebSocket.
 
-## Próximas fases
+## Próximas fatias
 
-- Fase 3: grade funcional e primeira ação end-to-end;
+- Fase 3: grade funcional, estados de execução no Android e primeira validação
+  end-to-end com o cliente;
 - fases seguintes: editor, perfis, descoberta, TLS/mTLS, empacotamento e release
   verificável.
