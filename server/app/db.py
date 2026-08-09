@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
@@ -33,16 +35,52 @@ class Database:
 
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = resolve_database_path(path)
+        self._is_memory = self.path == ":memory:"
+        self._connect_target = (
+            f"file:streamdeck-{uuid.uuid4().hex}?mode=memory&cache=shared"
+            if self._is_memory
+            else str(self.path)
+        )
+        self._memory_keepalive: sqlite3.Connection | None = None
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _configure_connection(connection: sqlite3.Connection) -> None:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
 
     def connect(self) -> sqlite3.Connection:
         """Open a connection with row access and foreign-key enforcement."""
-        if self.path != ":memory:":
+        if not self._is_memory:
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
 
-        connection = sqlite3.connect(str(self.path), timeout=30.0)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA foreign_keys = ON")
-        return connection
+        with self._lock:
+            if self._is_memory and self._memory_keepalive is None:
+                keepalive = sqlite3.connect(
+                    self._connect_target,
+                    timeout=30.0,
+                    uri=True,
+                    check_same_thread=False,
+                )
+                self._configure_connection(keepalive)
+                self._memory_keepalive = keepalive
+
+            connection = sqlite3.connect(
+                self._connect_target,
+                timeout=30.0,
+                uri=self._is_memory,
+            )
+            self._configure_connection(connection)
+            return connection
+
+    def close(self) -> None:
+        """Release the private keep-alive connection for an in-memory database."""
+        with self._lock:
+            if self._memory_keepalive is not None:
+                self._memory_keepalive.close()
+                self._memory_keepalive = None
+
+    release = close
 
     def initialize(self) -> None:
         """Apply all migrations to the configured database."""

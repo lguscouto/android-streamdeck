@@ -68,6 +68,37 @@ def test_fresh_database_bootstraps_latest_schema_and_is_idempotent(
         }
 
 
+def test_in_memory_database_stays_initialized_across_connections() -> None:
+    database = Database(":memory:")
+    repository = ProfileRepository(database)
+
+    database.initialize()
+
+    with database.connect() as connection:
+        assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        assert (
+            connection.execute("PRAGMA user_version").fetchone()[0]
+            == LATEST_SCHEMA_VERSION
+        )
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+    assert tables == {
+        "profiles",
+        "pages",
+        "buttons",
+        "actions",
+        "profile_revisions",
+    }
+
+    profile = load_profile()
+    assert repository.seed_profile(profile) == profile
+    assert repository.get_profile("default") == profile
+
+
 def test_foreign_keys_and_layout_constraints_reject_orphans_and_duplicates(
     tmp_path: Path,
 ) -> None:
