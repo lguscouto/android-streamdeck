@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unicodedata
 from typing import Annotated, Literal, TypeAlias
 from urllib.parse import urlsplit
@@ -41,9 +42,12 @@ HTTPS_PORT_PATTERN = (
     r"(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|"
     r"65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])"
 )
+HOST_PATTERN = (
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*"
+)
 HTTPS_URL_PATTERN = (
-    r"^https://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|"
-    r"\[[0-9A-Fa-f:.]+\])"
+    rf"^https://{HOST_PATTERN}"
     rf"(?::{HTTPS_PORT_PATTERN})?"
     r"(?:[/?#][^\s\\\x00-\x1F\x7F-\x9F]*)?$"
 )
@@ -137,6 +141,10 @@ class UrlAction(StrictModel):
             or parsed.hostname is None
         ):
             raise ValueError("url must be a valid HTTPS URL")
+        if any(bracket in parsed.netloc for bracket in "[]"):
+            raise ValueError("IPv6 hosts are not allowed in v1 URLs")
+        if not re.fullmatch(HOST_PATTERN, parsed.hostname, flags=re.ASCII):
+            raise ValueError("url hostname must use strict ASCII DNS syntax")
         if parsed.netloc.endswith(":"):
             raise ValueError("url port must not be empty")
         if parsed.username is not None or parsed.password is not None:

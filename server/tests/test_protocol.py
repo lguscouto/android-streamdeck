@@ -237,6 +237,22 @@ def test_url_action_rejects_userinfo(url: str) -> None:
         UrlAction(type="url", url=url)
 
 
+@pytest.mark.parametrize(
+    "host",
+    ["a..b", "a-.com", "-a.com", "[1:2:3]", "[::1]"],
+)
+def test_url_action_rejects_v1_invalid_hosts(host: str) -> None:
+    with pytest.raises(ValidationError):
+        UrlAction(type="url", url=f"https://{host}")
+
+
+@pytest.mark.parametrize(
+    "host", ["localhost", "example.com", "sub-domain.example.com", "192.168.1.10"]
+)
+def test_url_action_accepts_v1_hosts(host: str) -> None:
+    UrlAction(type="url", url=f"https://{host}")
+
+
 def test_url_action_schema_matches_shared_contract() -> None:
     url_schema = UrlAction.model_json_schema()["properties"]["url"]
     shared_url_schema = load_schema(PROFILE_SCHEMA_PATH)["$defs"]["urlAction"][
@@ -245,8 +261,8 @@ def test_url_action_schema_matches_shared_contract() -> None:
 
     assert url_schema["format"] == "uri"
     assert url_schema["pattern"] == (
-        r"^https://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|"
-        r"\[[0-9A-Fa-f:.]+\])"
+        r"^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+        r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*"
         r"(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|"
         r"65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?"
         r"(?:[/?#][^\s\\\x00-\x1F\x7F-\x9F]*)?$"
@@ -284,6 +300,33 @@ def test_shared_profile_schema_rejects_url_security_probes(url: str) -> None:
     profile["pages"][0]["buttons"][0]["action"] = {"type": "url", "url": url}
 
     assert list(profile_schema_validator().iter_errors(profile))
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["a..b", "a-.com", "-a.com", "[1:2:3]", "[::1]"],
+)
+def test_shared_profile_schema_rejects_v1_invalid_hosts(host: str) -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {
+        "type": "url",
+        "url": f"https://{host}",
+    }
+
+    assert list(profile_schema_validator().iter_errors(profile))
+
+
+@pytest.mark.parametrize(
+    "host", ["localhost", "example.com", "sub-domain.example.com", "192.168.1.10"]
+)
+def test_shared_profile_schema_accepts_v1_hosts(host: str) -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {
+        "type": "url",
+        "url": f"https://{host}",
+    }
+
+    assert not list(profile_schema_validator().iter_errors(profile))
 
 
 def test_url_action_rejects_empty_port() -> None:
@@ -592,6 +635,20 @@ def test_all_optional_fields_round_trip_through_explicit_wire_api() -> None:
 def test_invalid_message_fixtures_are_rejected(fixture: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         MessageAdapter.validate_python(fixture["message"])
+
+
+def test_invalid_message_fixture_catalog_has_expected_count_and_ids() -> None:
+    fixtures = load_invalid_messages()
+
+    assert len(fixtures) == 6
+    assert [fixture["id"] for fixture in fixtures] == [
+        "unknown-type",
+        "press-without-button-id",
+        "unknown-action-type",
+        "shell-at-envelope",
+        "command-in-application",
+        "arbitrary-media-command",
+    ]
 
 
 @pytest.mark.parametrize(
