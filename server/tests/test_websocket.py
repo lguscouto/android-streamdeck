@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -167,6 +168,57 @@ def test_websocket_press_rejects_stale_revision_and_unknown_button(
     assert missing["type"] == "error"
     assert missing["payload"]["code"] == "BUTTON_NOT_FOUND"
     assert "sqlite" not in str(stale).lower()
+
+
+def test_websocket_press_cannot_target_another_session_profile(
+    tmp_path: Path,
+) -> None:
+    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    repository = seeded_app.state.profile_repository
+    second_profile = json.loads(
+        (
+            Path(__file__).resolve().parents[2]
+            / "shared"
+            / "fixtures"
+            / "default-profile.json"
+        ).read_text(encoding="utf-8")
+    )
+    second_profile["id"] = "second"
+    repository.seed_profile(second_profile)
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+    )
+
+    with TestClient(app).websocket_connect("/api/v1/ws") as websocket:
+        websocket.send_json(hello_message())
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json(
+            {
+                "protocol_version": 1,
+                "type": "press",
+                "payload": {
+                    "request_id": "cross-profile",
+                    "profile_id": "second",
+                    "page_id": "main",
+                    "button_id": "save-shortcut",
+                    "revision": 1,
+                },
+            }
+        )
+        response = websocket.receive_json()
+
+    assert response == {
+        "protocol_version": 1,
+        "type": "error",
+        "payload": {
+            "request_id": "cross-profile",
+            "code": "PROFILE_NOT_SELECTED",
+            "message": "Profile is not selected for this session",
+            "retryable": False,
+        },
+    }
 
 
 def test_websocket_profile_change_is_broadcast_to_connected_client(

@@ -175,6 +175,16 @@ async def _handle_press(
         await websocket.send_text(previous)
         return
 
+    if message.payload.profile_id != session.profile_id:
+        wire = await _send_error(
+            websocket,
+            "PROFILE_NOT_SELECTED",
+            "Profile is not selected for this session",
+            request_id=request_id,
+        )
+        _cache_response(session, request_id, wire)
+        return
+
     try:
         profile = await run_in_threadpool(
             repository.get_profile,
