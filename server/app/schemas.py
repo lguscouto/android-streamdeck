@@ -40,6 +40,14 @@ GridDimension: TypeAlias = Annotated[int, Field(ge=1, le=64)]
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
+    def to_wire(self) -> dict[str, object]:
+        """Serialize this protocol model for transmission without unset fields."""
+        return self.model_dump(mode="json", exclude_unset=True)
+
+    def to_wire_json(self) -> str:
+        """Serialize this protocol model as wire JSON without unset fields."""
+        return self.model_dump_json(exclude_unset=True)
+
 
 Modifier = Literal["ctrl", "alt", "shift", "win"]
 MediaCommand = Literal[
@@ -83,7 +91,15 @@ class TextAction(StrictModel):
 
 class UrlAction(StrictModel):
     type: Literal["url"]
-    url: Annotated[str, Field(min_length=1, max_length=2048)]
+    url: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=2048,
+            pattern=r"^https://[^\s\\]+$",
+            json_schema_extra={"format": "uri"},
+        ),
+    ]
 
     @field_validator("url")
     @classmethod
