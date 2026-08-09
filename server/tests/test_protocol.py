@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from jsonschema import Draft202012Validator
+from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import BaseModel, ValidationError
 from referencing import Registry, Resource
 
@@ -74,14 +74,22 @@ def local_schema_registry() -> Registry:
 
 def profile_schema_validator() -> Draft202012Validator:
     schema = load_schema(PROFILE_SCHEMA_PATH)
-    validator = Draft202012Validator(schema, registry=local_schema_registry())
+    validator = Draft202012Validator(
+        schema,
+        format_checker=FormatChecker(),
+        registry=local_schema_registry(),
+    )
     validator.check_schema(schema)
     return validator
 
 
 def message_schema_validator() -> Draft202012Validator:
     schema = load_schema(MESSAGE_SCHEMA_PATH)
-    validator = Draft202012Validator(schema, registry=local_schema_registry())
+    validator = Draft202012Validator(
+        schema,
+        format_checker=FormatChecker(),
+        registry=local_schema_registry(),
+    )
     validator.check_schema(schema)
     return validator
 
@@ -215,16 +223,17 @@ def test_url_action_rejects_backslashes() -> None:
         UrlAction(type="url", url=r"https://example.com\evil")
 
 
-def test_url_action_rejects_ascii_control_characters() -> None:
+@pytest.mark.parametrize("control", ["\x01", "\x7f", "\x80", "\x9f"])
+def test_url_action_rejects_c0_and_c1_control_characters(control: str) -> None:
     with pytest.raises(ValidationError):
-        UrlAction(type="url", url="https://example.com\x01x")
+        UrlAction(type="url", url=f"https://example.com{control}x")
 
 
 @pytest.mark.parametrize(
     "url", ["https://user:pass@example.com", "https://example.com:443@evil.com"]
 )
 def test_url_action_rejects_userinfo(url: str) -> None:
-    with pytest.raises(ValidationError, match="userinfo"):
+    with pytest.raises(ValidationError):
         UrlAction(type="url", url=url)
 
 
@@ -235,7 +244,13 @@ def test_url_action_schema_matches_shared_contract() -> None:
     ]["url"]
 
     assert url_schema["format"] == "uri"
-    assert url_schema["pattern"] == r"^https://[^\s\\\x00-\x1F\x7F]+$"
+    assert url_schema["pattern"] == (
+        r"^https://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|"
+        r"\[[0-9A-Fa-f:.]+\])"
+        r"(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|"
+        r"65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?"
+        r"(?:[/?#][^\s\\\x00-\x1F\x7F-\x9F]*)?$"
+    )
     assert shared_url_schema["pattern"] == url_schema["pattern"]
 
 
@@ -250,7 +265,19 @@ def test_generated_schema_declares_unique_items_for_unique_lists() -> None:
 
 
 @pytest.mark.parametrize(
-    "url", ["https://example.com\\evil", "https://example.com\x01x"]
+    "url",
+    [
+        "https://example.com\\evil",
+        "https://example.com\x01x",
+        "https://example.com\x80x",
+        "https://user:pass@example.com",
+        "https://example.com:443@evil.com",
+        "https://example.com:",
+        "https://example.com:bad",
+        "https://example.com:0",
+        "https://example.com:65536",
+        "https://example.com:99999",
+    ],
 )
 def test_shared_profile_schema_rejects_url_security_probes(url: str) -> None:
     profile = profile_with_single_button()
@@ -259,12 +286,19 @@ def test_shared_profile_schema_rejects_url_security_probes(url: str) -> None:
     assert list(profile_schema_validator().iter_errors(profile))
 
 
-def test_url_action_accepts_empty_port_as_allowed_by_shared_contract() -> None:
-    UrlAction(type="url", url="https://example.com:")
+def test_url_action_rejects_empty_port() -> None:
+    with pytest.raises(ValidationError):
+        UrlAction(type="url", url="https://example.com:")
 
 
 @pytest.mark.parametrize(
-    "url", ["https://example.com:bad", "https://example.com:0", "https://example.com:99999"]
+    "url",
+    [
+        "https://example.com:bad",
+        "https://example.com:0",
+        "https://example.com:65536",
+        "https://example.com:99999",
+    ],
 )
 def test_url_action_rejects_invalid_https_ports(url: str) -> None:
     profile = profile_with_single_button()
@@ -274,12 +308,15 @@ def test_url_action_rejects_invalid_https_ports(url: str) -> None:
         Profile.model_validate(profile)
 
 
-@pytest.mark.parametrize("url", ["https://example.com:1", "https://example.com:65535"])
+@pytest.mark.parametrize(
+    "url", ["https://example.com", "https://example.com:1", "https://example.com:65535"]
+)
 def test_url_action_accepts_valid_https_port_boundaries(url: str) -> None:
     profile = profile_with_single_button()
     profile["pages"][0]["buttons"][0]["action"] = {"type": "url", "url": url}
 
     Profile.model_validate(profile)
+    assert not list(profile_schema_validator().iter_errors(profile))
 
 
 def test_duplicate_hotkey_modifiers_are_rejected() -> None:
@@ -592,6 +629,22 @@ def test_local_draft_2020_12_registry_validates_profile_reference_without_networ
 
     assert not profile_errors
     assert not message_errors
+
+
+@pytest.mark.parametrize(
+    "message", wire_message_examples(), ids=lambda message: str(message["type"])
+)
+def test_all_wire_messages_are_accepted_by_local_draft_2020_12_schema(
+    message: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_if_network_is_used(*args: object, **kwargs: object) -> None:
+        raise AssertionError("JSON Schema resolution must not use the network")
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_if_network_is_used)
+
+    errors = list(message_schema_validator().iter_errors(message))
+
+    assert not errors
 
 
 def test_all_message_variants_are_accepted() -> None:

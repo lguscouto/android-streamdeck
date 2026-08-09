@@ -37,6 +37,17 @@ NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0)]
 PositiveInt: TypeAlias = Annotated[int, Field(ge=1)]
 GridDimension: TypeAlias = Annotated[int, Field(ge=1, le=64)]
 
+HTTPS_PORT_PATTERN = (
+    r"(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|"
+    r"65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])"
+)
+HTTPS_URL_PATTERN = (
+    r"^https://(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|"
+    r"\[[0-9A-Fa-f:.]+\])"
+    rf"(?::{HTTPS_PORT_PATTERN})?"
+    r"(?:[/?#][^\s\\\x00-\x1F\x7F-\x9F]*)?$"
+)
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -101,7 +112,7 @@ class UrlAction(StrictModel):
         Field(
             min_length=1,
             max_length=2048,
-            pattern=r"^https://[^\s\\\x00-\x1F\x7F]+$",
+            pattern=HTTPS_URL_PATTERN,
             json_schema_extra={"format": "uri"},
         ),
     ]
@@ -120,8 +131,14 @@ class UrlAction(StrictModel):
             port = parsed.port
         except ValueError as exc:
             raise ValueError("url must be a valid HTTPS URL") from exc
-        if parsed.scheme != "https" or not parsed.netloc or parsed.hostname is None:
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.hostname is None
+        ):
             raise ValueError("url must be a valid HTTPS URL")
+        if parsed.netloc.endswith(":"):
+            raise ValueError("url port must not be empty")
         if parsed.username is not None or parsed.password is not None:
             raise ValueError("url userinfo is not allowed")
         if port is not None and not 1 <= port <= 65535:
