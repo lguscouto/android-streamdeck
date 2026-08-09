@@ -38,6 +38,7 @@ class PairingFlowInstrumentedTest {
             fields.last().setText(pairingCode)
             device.findObject(By.text("Parear e conectar")).click()
             assertAuthenticatedProfile()
+            assertActionFeedback()
         }
 
         val credentials = store.load()
@@ -57,6 +58,13 @@ class PairingFlowInstrumentedTest {
         }
     }
 
+    private fun assertActionFeedback() {
+        device.findObject(By.text("Atalho Ctrl+Shift+S")).click()
+        assertTrue(device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS))
+        device.findObject(By.text("Reproduzir/pausar")).click()
+        assertTrue(device.wait(Until.hasObject(By.text("Erro")), TIMEOUT_MS))
+    }
+
     private fun waitForFields(): List<androidx.test.uiautomator.UiObject2> {
         assertTrue(device.wait(Until.hasObject(By.clazz("android.widget.EditText")), TIMEOUT_MS))
         repeat(20) {
@@ -70,15 +78,26 @@ class PairingFlowInstrumentedTest {
     }
 
     private fun assertAuthenticatedProfile() {
-        assertTrue(device.wait(Until.hasObject(By.text("Conectado")), TIMEOUT_MS))
-        assertTrue(device.wait(Until.hasObject(By.text("Servidor autenticado")), TIMEOUT_MS))
+        assertTextVisible("Conectado")
+        assertTextVisible("Servidor autenticado")
+        assertTextVisible("Perfil sincronizado na revisão 1")
+        assertTextVisible("Página: Principal")
+        assertTextVisible("Atalho Ctrl+Shift+S")
+        assertTextVisible("Reproduzir/pausar")
+        assertTextVisible("Documentação")
+    }
+
+    private fun assertTextVisible(expectedText: String) {
         assertTrue(
-            device.wait(
-                Until.hasObject(By.text("Perfil sincronizado na revisão 1")),
-                TIMEOUT_MS,
-            ),
+            "Expected '$expectedText'. Visible text: ${visibleNonSensitiveText()}",
+            device.wait(Until.hasObject(By.text(expectedText)), TIMEOUT_MS),
         )
     }
+
+    private fun visibleNonSensitiveText(): String = device
+        .findObjects(By.clazz("android.widget.TextView"))
+        .mapNotNull { textView -> textView.text?.toString()?.takeIf { it.isNotBlank() } }
+        .joinToString(separator = " | ")
 
     private companion object {
         const val TIMEOUT_MS = 10_000L

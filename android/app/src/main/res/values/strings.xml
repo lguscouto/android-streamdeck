@@ -3,6 +3,17 @@
     <string name="app_name">Android Stream Deck</string>
     <string name="app_title">Android Stream Deck</string>
     <string name="phase2_subtitle">Pareie este celular com o servidor Windows</string>
+    <string name="phase3_subtitle">Perfil conectado e ações controladas</string>
+    <string name="active_page">Página: %1$s</string>
+    <string name="empty_grid_cell">Célula vazia</string>
+    <string name="action_button_description">%1$s. Estado: %2$s</string>
+    <string name="action_state_ready">Pronto</string>
+    <string name="action_state_executing">Executando</string>
+    <string name="action_state_completed">Concluído</string>
+    <string name="action_state_rejected">Erro</string>
+    <string name="action_not_connected">Ação indisponível: não há conexão autenticada</string>
+    <string name="action_send_failed">A solicitação não pôde ser enviada</string>
+    <string name="invalid_profile_snapshot">O perfil recebido é inválido</string>
     <string name="server_address_label">Endereço do servidor</string>
     <string name="client_id_label">Identificador deste celular</string>
     <string name="pairing_code_label">Código de pareamento</string>

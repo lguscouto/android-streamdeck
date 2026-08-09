@@ -27,7 +27,7 @@ Esta matriz separa o inventário verificado no host das escolhas provisórias pa
 | Dependências da toolchain | Cache local com AGP `8.2.1`, `8.7.2`, `8.8.2`; Gradle `8.10.2`, `8.13`, `9.4.1`; Kotlin Gradle plugin `2.0.21`; Compose UI `1.8.3`; Material3 `1.3.2`; Activity Compose `1.10.0` | Kotlin `2.0.21`, AGP `8.8.2`, Gradle `8.10.2` | Versões disponíveis no cache; a combinação ainda deve ser exercitada no build do projeto |
 | A10 | Nenhum dispositivo/emulador conectado; `ro.build.version.sdk`, modelo, tamanho e densidade não medidos | `minSdk 26` somente para manter o esqueleto compilável | Deve ser confirmado/ajustado após obter a API real do A10, antes do release |
 | Servidor | Python `3.14.6` e uv `0.11.21` encontrados | Python `3.14.6` com uv `0.11.21`, FastAPI/WebSocket, `127.0.0.1:8765` no desenvolvimento | Bind remoto exige código de pareamento e autenticação |
-| Grade do painel | Dimensões e densidade do A10 ainda não medidas | Grade inicial configurável de 3 colunas x 5 linhas | Default provisório; revisar quando houver medidas reais do aparelho |
+| Grade do painel | O perfil padrão foi validado em 3 colunas x 5 linhas no `Pixel_8`; dimensões/densidade do A10 ainda não foram medidas | Grade definida pelo snapshot `rows × columns`, com perfil de desenvolvimento 3x5 | Revalidar a ergonomia no A10 quando houver medidas reais |
 
 ### Como revisar a decisão quando o A10 for conectado
 
@@ -41,8 +41,8 @@ Esta matriz separa o inventário verificado no host das escolhas provisórias pa
 
 - **Linguagem e UI:** Kotlin e Jetpack Compose.
 - **Comunicação:** cliente OkHttp, com WebSocket para eventos de conexão e execução em tempo real. Requests HTTP de suporte, como health check ou catálogo, podem ser adicionados sem duplicar contratos.
-- **Estado:** a UI deve refletir explicitamente desconectado, conectando, conectado, executando, sucesso e erro.
-- **Modelo de ação:** cada botão referencia um identificador de ação conhecido e um payload tipado/validado; a UI não monta comandos de sistema.
+- **Estado:** a UI reflete explicitamente desconectado, conectando, conectado, executando, concluído e erro. Cada `ack` ou `error` é associado ao `request_id` pendente antes de alterar o botão.
+- **Modelo de ação:** o Android valida o `profile_snapshot`, renderiza `rows × columns` e envia apenas identificadores e revisão em `press`; a UI não monta comandos de sistema nem recebe payloads de execução.
 - **Configuração:** endereço do servidor e parâmetros locais do painel são configuráveis pelo usuário, sem depender de descoberta automática no primeiro MVP.
 
 ## Servidor Windows

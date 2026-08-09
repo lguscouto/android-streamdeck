@@ -9,8 +9,8 @@
       "id": "main",
       "title": "Principal",
       "order": 0,
-      "rows": 2,
-      "columns": 2,
+      "rows": 5,
+      "columns": 3,
       "buttons": [
         {
           "id": "save-shortcut",

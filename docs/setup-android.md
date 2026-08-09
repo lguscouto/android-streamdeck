@@ -206,6 +206,28 @@ SQLite temporário e dados do aplicativo foram removidos ao fim do smoke; a port
 `8765` não permaneceu em escuta. Consulte
 [`phase-2-delivery.md`](phase-2-delivery.md) para os comandos e artefatos finais.
 
+## Smoke funcional da Fase 3
+
+A Fase 3 foi validada no mesmo `Pixel_8`/`emulator-5554` com
+`connectedDebugAndroidTest`. O servidor efêmero usou banco e código de
+pareamento aleatórios fora do repositório. Para não acionar o desktop do host
+em automação, `server/scripts/phase3_e2e_server.py` injeta um adaptador gravador
+no registry; o fluxo de produção continua usando o adaptador Windows real.
+
+O smoke aprovou:
+
+1. pareamento HTTP e `hello` WebSocket autenticado;
+2. snapshot validado, página principal em grade 3 colunas × 5 linhas e três
+   botões visíveis;
+3. `press` de hotkey retornando `Concluído` e registro controlado de
+   `ctrl+shift+s` no servidor;
+4. ação de mídia sem adaptador retornando `Erro` no botão;
+5. armazenamento cifrado e reconexão sem reenviar código;
+6. cleanup do processo, banco temporário e porta `8765`.
+
+O destino de validação continua sendo o emulador. O A10 não foi conectado e,
+portanto, permanece sem validação funcional ou visual.
+
 ## Recomendação provisória para o desenvolvimento
 
 - Usar explicitamente o JBR 21 do Android Studio em comandos e configurações locais. O caminho confirmado é `C:\Program Files\Android\Android Studio\jbr\bin\java.exe` (ou `/c/Program Files/Android/Android Studio/jbr/bin/java.exe` no MSYS).

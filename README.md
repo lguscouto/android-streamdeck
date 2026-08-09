@@ -17,8 +17,8 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 
 ## Estado atual
 
-As **Fases 1 e 2** estão implementadas. A **Fase 3 está em andamento**, com a
-primeira fatia do servidor concluída.
+As **Fases 1, 2 e 3** estão implementadas e validadas no `Pixel_8`.
+A Fase 3 entrega a primeira ação autenticada ponta a ponta.
 
 ### Fase 1 — servidor e contratos
 
@@ -43,16 +43,20 @@ primeira fatia do servidor concluída.
 - cleartext HTTP/WS permitido apenas no manifesto `debug`; o manifesto principal
   mantém `usesCleartextTraffic=false`.
 
-### Fase 3 — execução controlada (em andamento)
+### Fase 3 — execução controlada
 
 - registry interno fechado para ações;
 - primeira hotkey Windows via `keybd_event` e mapa explícito de teclas virtuais;
-- `press` válido recebe `ack` como `completed` ou `rejected` e mantém
-  idempotência por `request_id`;
+- Android valida o `profile_snapshot` e mostra a página ativa em grade configurada
+  por `rows × columns` (perfil de desenvolvimento: 3 colunas × 5 linhas);
+- toque envia somente `request_id`, IDs e revisão; nenhuma hotkey ou comando sai
+  do Android;
+- `ack/completed`, `ack/rejected` e `error` atualizam o botão correto como
+  `Concluído` ou `Erro`, com bloqueio durante execução;
+- smoke UiAutomator no `Pixel_8` comprovou pareamento, WebSocket, grade, hotkey
+  registrada, rejeição segura e reconexão criptografada;
 - `media`, `text`, `url`, `key` e `application` continuam rejeitadas até que
-  recebam adaptadores específicos, testados e seguros;
-- a grade Android e a validação E2E com o cliente permanecem nas próximas
-  fatias da Fase 3.
+  recebam adaptadores específicos, testados e seguros.
 
 ### Acesso local padrão
 
@@ -65,8 +69,9 @@ implementados, inclusive no cliente Android. O token Android é criptografado co
 AES-GCM por chave não exportável no Android Keystore e permanece vinculado ao
 endpoint que o emitiu. A primeira hotkey só é emitida pelo adaptador Windows a
 partir de teclas virtuais permitidas; não há shell, comando livre ou caminho
-recebido do cliente. A grade Android, os estados visuais de execução e o smoke
-integrado do cliente continuam como próximas fatias da Fase 3.
+recebido do cliente. A grade Android e os estados de execução foram validados no
+`Pixel_8`; consulte [`docs/phase-3-delivery.md`](docs/phase-3-delivery.md) para
+o smoke controlado, comandos e limitações.
 
 Validação atual do servidor:
 
@@ -101,9 +106,8 @@ configurar uma base SQLite diferente, defina `STREAMDECK_DATABASE_PATH`; o
 padrão é `server/data/streamdeck.sqlite3`, ignorado pelo Git. Consulte
 [`server/README.md`](server/README.md) para o contrato HTTP e WebSocket.
 
-## Próximas fatias
+## Próximas fases
 
-- Fase 3: grade funcional, estados de execução no Android e primeira validação
-  end-to-end com o cliente;
-- fases seguintes: editor, perfis, descoberta, TLS/mTLS, empacotamento e release
-  verificável.
+- Fase 4: editor de perfis/layouts, novos adaptadores fechados e recarga do
+  snapshot após alterações remotas;
+- fases posteriores: descoberta, TLS/mTLS, empacotamento e release verificável.

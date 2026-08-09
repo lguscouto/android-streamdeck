@@ -106,16 +106,20 @@ Falhas usam sempre a forma sanitizada:
 
 O servidor não executa shell, `command`, `subprocess` ou ações arbitrárias.
 
-## Execução de ações — primeira fatia da Fase 3
+## Execução de ações — Fase 3
 
 O registry do servidor está fechado. Nesta etapa, somente a ação `hotkey` possui
 adaptador ativo: modificadores e tecla são transformados por um mapa interno de
 virtual keys e emitidos no Windows por `keybd_event`. Nenhum comando de shell,
 caminho ou argumento livre é montado a partir do cliente.
 
+O cliente Android valida o snapshot, envia somente IDs/revisão no `press` e
+associa o `ack` ou `error` ao botão pelo `request_id`. O perfil de desenvolvimento
+fornece uma grade de 3 colunas × 5 linhas para a página principal.
+
 As ações `key`, `media`, `text`, `url` e `application` continuam sem adaptador e
 recebem `ack` com `status: "rejected"`. Elas só serão habilitadas com contratos e
-testes específicos nas próximas fatias.
+testes específicos nas próximas fases.
 
 ## WebSocket e limites
 

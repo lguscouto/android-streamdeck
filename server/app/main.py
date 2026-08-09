@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI
 from pydantic import BaseModel
 
+from app.actions import ActionExecutor
 from app.api import create_router, register_exception_handlers
 from app.config import Settings
 from app.db import Database
@@ -37,6 +38,7 @@ def create_app(
     settings: Settings | None = None,
     repository: ProfileRepository | None = None,
     websocket_manager: Any = None,
+    action_executor: ActionExecutor | None = None,
 ) -> FastAPI:
     """Create the FastAPI application with optional persistence dependencies."""
     runtime_settings = settings or Settings.from_env()
@@ -60,6 +62,7 @@ def create_app(
         repository,
         pairing_service=pairing_service,
         require_auth=runtime_settings.require_auth,
+        action_executor=action_executor,
     )
     application = FastAPI(title=SERVICE_NAME, version=PROTOCOL_VERSION)
     application.state.settings = runtime_settings

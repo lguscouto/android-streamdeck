@@ -1,9 +1,7 @@
 package br.com.gustavo.streamdeck
 
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,20 +19,28 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.launch
-import okhttp3.WebSocket
-import org.json.JSONObject
+import br.com.gustavo.streamdeck.network.ActionAcknowledgementStatus
+import br.com.gustavo.streamdeck.network.EncryptedPairingStore
 import br.com.gustavo.streamdeck.network.PairingClient
 import br.com.gustavo.streamdeck.network.PairingCredentials
 import br.com.gustavo.streamdeck.network.PairingException
-import br.com.gustavo.streamdeck.network.EncryptedPairingStore
+import br.com.gustavo.streamdeck.network.ProfileSnapshotParser
+import br.com.gustavo.streamdeck.network.ProtocolMessages
 import br.com.gustavo.streamdeck.network.ServerEndpoint
+import br.com.gustavo.streamdeck.network.StreamDeckButton
+import br.com.gustavo.streamdeck.network.StreamDeckProfileSnapshot
 import br.com.gustavo.streamdeck.network.StreamDeckSocketListener
 import br.com.gustavo.streamdeck.network.StreamDeckWebSocketClient
+import br.com.gustavo.streamdeck.ui.ButtonExecutionState
+import br.com.gustavo.streamdeck.ui.StreamDeckGrid
+import java.util.UUID
+import kotlinx.coroutines.launch
+import okhttp3.WebSocket
+import org.json.JSONObject
 
 private enum class ConnectionStatus {
     DISCONNECTED,
@@ -63,6 +69,9 @@ private fun PairingScreen() {
     val scope = rememberCoroutineScope()
     val pairingClient = remember { PairingClient() }
     val websocketClient = remember { StreamDeckWebSocketClient() }
+    val invalidProfileSnapshot = stringResource(R.string.invalid_profile_snapshot)
+    val actionNotConnected = stringResource(R.string.action_not_connected)
+    val actionSendFailed = stringResource(R.string.action_send_failed)
     var serverAddress by remember {
         mutableStateOf(storedCredentials?.serverBaseUrl ?: "http://10.0.2.2:8765")
     }
@@ -77,20 +86,36 @@ private fun PairingScreen() {
     var pairedServerBaseUrl by remember { mutableStateOf(storedCredentials?.serverBaseUrl) }
     var status by remember { mutableStateOf(ConnectionStatus.DISCONNECTED) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var revision by remember { mutableStateOf<Int?>(null) }
+    var profileSnapshot by remember { mutableStateOf<StreamDeckProfileSnapshot?>(null) }
+    var buttonStates by remember { mutableStateOf<Map<String, ButtonExecutionState>>(emptyMap()) }
+    var pendingPresses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var socket by remember { mutableStateOf<WebSocket?>(null) }
 
-    DisposableEffect(Unit) {
+    val socketForEffect = socket
+    DisposableEffect(socketForEffect) {
         onDispose {
-            socket?.close(1000, "screen closed")
+            socketForEffect?.close(1000, "screen closed")
         }
+    }
+
+    fun rejectPendingActions(message: String) {
+        val pendingButtons = pendingPresses.values
+        if (pendingButtons.isNotEmpty()) {
+            buttonStates = buttonStates + pendingButtons.associateWith {
+                ButtonExecutionState.REJECTED
+            }
+            pendingPresses = emptyMap()
+        }
+        statusMessage = message
     }
 
     fun connect() {
         scope.launch {
             status = ConnectionStatus.CONNECTING
             statusMessage = null
-            revision = null
+            profileSnapshot = null
+            buttonStates = emptyMap()
+            pendingPresses = emptyMap()
             try {
                 val endpoint = ServerEndpoint.parse(serverAddress)
                 var token = accessToken
@@ -142,19 +167,60 @@ private fun PairingScreen() {
                                     statusMessage = "Servidor autenticado"
                                 }
                                 "profile_snapshot" -> {
-                                    revision = runCatching {
-                                        JSONObject(rawMessage)
-                                            .getJSONObject("payload")
-                                            .getJSONObject("profile")
-                                            .getInt("revision")
-                                    }.getOrNull()
+                                    runCatching { ProfileSnapshotParser.parse(rawMessage) }
+                                        .onSuccess { snapshot ->
+                                            profileSnapshot = snapshot
+                                        }
+                                        .onFailure {
+                                            status = ConnectionStatus.ERROR
+                                            statusMessage = invalidProfileSnapshot
+                                        }
+                                }
+                                "ack" -> {
+                                    val acknowledgement = ProtocolMessages
+                                        .actionAcknowledgement(rawMessage)
+                                        ?: return
+                                    val buttonId = pendingPresses[acknowledgement.requestId] ?: return
+                                    when (acknowledgement.status) {
+                                        ActionAcknowledgementStatus.ACCEPTED -> {
+                                            buttonStates = buttonStates + (
+                                                buttonId to ButtonExecutionState.EXECUTING
+                                            )
+                                        }
+                                        ActionAcknowledgementStatus.COMPLETED -> {
+                                            buttonStates = buttonStates + (
+                                                buttonId to ButtonExecutionState.COMPLETED
+                                            )
+                                            pendingPresses = pendingPresses - acknowledgement.requestId
+                                            statusMessage = acknowledgement.message ?: "Ação concluída"
+                                        }
+                                        ActionAcknowledgementStatus.REJECTED -> {
+                                            buttonStates = buttonStates + (
+                                                buttonId to ButtonExecutionState.REJECTED
+                                            )
+                                            pendingPresses = pendingPresses - acknowledgement.requestId
+                                            statusMessage = acknowledgement.message ?: "Ação rejeitada"
+                                        }
+                                    }
                                 }
                                 "error" -> {
-                                    val payload = JSONObject(rawMessage)
-                                        .optJSONObject("payload")
-                                    status = ConnectionStatus.ERROR
-                                    statusMessage = payload?.optString("message")
+                                    val payload = JSONObject(rawMessage).optJSONObject("payload")
+                                    val requestId = payload?.optString("request_id")
+                                        ?.takeIf { it.isNotBlank() }
+                                    val message = payload?.optString("message")
                                         ?.ifBlank { "Erro do servidor" }
+                                        ?: "Erro do servidor"
+                                    val buttonId = requestId?.let { pendingPresses[it] }
+                                    if (buttonId == null) {
+                                        status = ConnectionStatus.ERROR
+                                        statusMessage = message
+                                    } else {
+                                        buttonStates = buttonStates + (
+                                            buttonId to ButtonExecutionState.REJECTED
+                                        )
+                                        pendingPresses = pendingPresses - requestId
+                                        statusMessage = message
+                                    }
                                 }
                             }
                         }
@@ -162,13 +228,13 @@ private fun PairingScreen() {
                         override fun onClosed() {
                             if (status == ConnectionStatus.CONNECTED) {
                                 status = ConnectionStatus.DISCONNECTED
-                                statusMessage = "Conexão encerrada"
+                                rejectPendingActions("Conexão encerrada")
                             }
                         }
 
                         override fun onFailure(message: String) {
                             status = ConnectionStatus.ERROR
-                            statusMessage = message
+                            rejectPendingActions(message)
                         }
                     },
                 )
@@ -179,28 +245,55 @@ private fun PairingScreen() {
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Text(
-            modifier = Modifier.fillMaxWidth(),
-            text = stringResource(R.string.app_title),
-            style = MaterialTheme.typography.headlineMedium,
-            textAlign = TextAlign.Center,
+    fun pressButton(button: StreamDeckButton) {
+        val snapshot = profileSnapshot ?: return
+        if (buttonStates[button.id] == ButtonExecutionState.EXECUTING) {
+            return
+        }
+        val activeSocket = socket
+        if (status != ConnectionStatus.CONNECTED || activeSocket == null) {
+            buttonStates = buttonStates + (button.id to ButtonExecutionState.REJECTED)
+            statusMessage = actionNotConnected
+            return
+        }
+        val requestId = UUID.randomUUID().toString()
+        buttonStates = buttonStates + (button.id to ButtonExecutionState.EXECUTING)
+        pendingPresses = pendingPresses + (requestId to button.id)
+        val wasSent = activeSocket.send(
+            ProtocolMessages.press(
+                requestId = requestId,
+                profileId = snapshot.profileId,
+                pageId = snapshot.activePage.id,
+                buttonId = button.id,
+                revision = snapshot.revision,
+            ),
         )
-        Text(
-            modifier = Modifier.fillMaxWidth(),
-            text = stringResource(R.string.phase2_subtitle),
-            style = MaterialTheme.typography.bodyLarge,
-            textAlign = TextAlign.Center,
-        )
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = serverAddress,
-            onValueChange = { updatedAddress ->
+        if (!wasSent) {
+            buttonStates = buttonStates + (button.id to ButtonExecutionState.REJECTED)
+            pendingPresses = pendingPresses - requestId
+            statusMessage = actionSendFailed
+        }
+    }
+
+    fun clearPairing() {
+        socket?.cancel()
+        socket = null
+        accessToken = null
+        pairedClientId = null
+        pairedServerBaseUrl = null
+        pairingStore.clear()
+        status = ConnectionStatus.DISCONNECTED
+        statusMessage = "Pareamento removido"
+        profileSnapshot = null
+        buttonStates = emptyMap()
+        pendingPresses = emptyMap()
+    }
+
+    val snapshot = profileSnapshot
+    if (snapshot == null) {
+        PairingForm(
+            serverAddress = serverAddress,
+            onServerAddressChange = { updatedAddress ->
                 serverAddress = updatedAddress
                 val updatedBaseUrl = runCatching {
                     ServerEndpoint.parse(updatedAddress).httpBaseUrl
@@ -212,13 +305,8 @@ private fun PairingScreen() {
                     pairingStore.clear()
                 }
             },
-            label = { Text(stringResource(R.string.server_address_label)) },
-            singleLine = true,
-        )
-        OutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = clientId,
-            onValueChange = { updatedClientId ->
+            clientId = clientId,
+            onClientIdChange = { updatedClientId ->
                 clientId = updatedClientId
                 if (updatedClientId.trim() != pairedClientId) {
                     accessToken = null
@@ -227,13 +315,65 @@ private fun PairingScreen() {
                     pairingStore.clear()
                 }
             },
+            pairingCode = pairingCode,
+            onPairingCodeChange = { pairingCode = it },
+            onConnect = ::connect,
+            onClearPairing = ::clearPairing,
+            status = status,
+            statusMessage = statusMessage,
+            revision = null,
+        )
+    } else {
+        ConnectedDeckScreen(
+            snapshot = snapshot,
+            connectionStatus = status,
+            statusMessage = statusMessage,
+            buttonStates = buttonStates,
+            onButtonPress = ::pressButton,
+            onClearPairing = ::clearPairing,
+        )
+    }
+}
+
+@Composable
+private fun PairingForm(
+    serverAddress: String,
+    onServerAddressChange: (String) -> Unit,
+    clientId: String,
+    onClientIdChange: (String) -> Unit,
+    pairingCode: String,
+    onPairingCodeChange: (String) -> Unit,
+    onConnect: () -> Unit,
+    onClearPairing: () -> Unit,
+    status: ConnectionStatus,
+    statusMessage: String?,
+    revision: Int?,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        AppTitle(subtitle = stringResource(R.string.phase2_subtitle))
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = serverAddress,
+            onValueChange = onServerAddressChange,
+            label = { Text(stringResource(R.string.server_address_label)) },
+            singleLine = true,
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = clientId,
+            onValueChange = onClientIdChange,
             label = { Text(stringResource(R.string.client_id_label)) },
             singleLine = true,
         )
         OutlinedTextField(
             modifier = Modifier.fillMaxWidth(),
             value = pairingCode,
-            onValueChange = { pairingCode = it },
+            onValueChange = onPairingCodeChange,
             label = { Text(stringResource(R.string.pairing_code_label)) },
             supportingText = {
                 Text(stringResource(R.string.pairing_code_supporting_text))
@@ -242,48 +382,105 @@ private fun PairingScreen() {
         )
         Button(
             modifier = Modifier.fillMaxWidth(),
-            onClick = ::connect,
+            onClick = onConnect,
             enabled = serverAddress.isNotBlank() && clientId.isNotBlank(),
         ) {
             Text(stringResource(R.string.pair_and_connect))
         }
-        Row(
+        OutlinedButton(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            onClick = onClearPairing,
         ) {
-            OutlinedButton(
-                modifier = Modifier.weight(1f),
-                onClick = {
-                    socket?.cancel()
-                    accessToken = null
-                    pairedClientId = null
-                    pairedServerBaseUrl = null
-                    pairingStore.clear()
-                    status = ConnectionStatus.DISCONNECTED
-                    statusMessage = "Pareamento removido"
-                    revision = null
-                },
-            ) {
-                Text(stringResource(R.string.clear_pairing))
-            }
+            Text(stringResource(R.string.clear_pairing))
         }
+        ConnectionStatusBlock(
+            status = status,
+            statusMessage = statusMessage,
+            revision = revision,
+        )
+    }
+}
+
+@Composable
+private fun ConnectedDeckScreen(
+    snapshot: StreamDeckProfileSnapshot,
+    connectionStatus: ConnectionStatus,
+    statusMessage: String?,
+    buttonStates: Map<String, ButtonExecutionState>,
+    onButtonPress: (StreamDeckButton) -> Unit,
+    onClearPairing: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        AppTitle(subtitle = stringResource(R.string.phase3_subtitle))
         Text(
-            text = when (status) {
-                ConnectionStatus.DISCONNECTED -> stringResource(R.string.status_disconnected)
-                ConnectionStatus.CONNECTING -> stringResource(R.string.status_connecting)
-                ConnectionStatus.CONNECTED -> stringResource(R.string.status_connected)
-                ConnectionStatus.ERROR -> stringResource(R.string.status_error)
-            },
+            text = stringResource(R.string.active_page, snapshot.activePage.title),
             style = MaterialTheme.typography.titleMedium,
         )
-        statusMessage?.let { message ->
-            Text(text = message, style = MaterialTheme.typography.bodyMedium)
+        ConnectionStatusBlock(
+            status = connectionStatus,
+            statusMessage = statusMessage,
+            revision = snapshot.revision,
+        )
+        StreamDeckGrid(
+            page = snapshot.activePage,
+            buttonStates = buttonStates,
+            onButtonPress = onButtonPress,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+        )
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onClearPairing,
+        ) {
+            Text(stringResource(R.string.clear_pairing))
         }
-        revision?.let { currentRevision ->
-            Text(
-                text = stringResource(R.string.profile_revision, currentRevision),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-        }
+    }
+}
+
+@Composable
+private fun AppTitle(subtitle: String) {
+    Text(
+        modifier = Modifier.fillMaxWidth(),
+        text = stringResource(R.string.app_title),
+        style = MaterialTheme.typography.headlineMedium,
+        textAlign = TextAlign.Center,
+    )
+    Text(
+        modifier = Modifier.fillMaxWidth(),
+        text = subtitle,
+        style = MaterialTheme.typography.bodyLarge,
+        textAlign = TextAlign.Center,
+    )
+}
+
+@Composable
+private fun ConnectionStatusBlock(
+    status: ConnectionStatus,
+    statusMessage: String?,
+    revision: Int?,
+) {
+    Text(
+        text = when (status) {
+            ConnectionStatus.DISCONNECTED -> stringResource(R.string.status_disconnected)
+            ConnectionStatus.CONNECTING -> stringResource(R.string.status_connecting)
+            ConnectionStatus.CONNECTED -> stringResource(R.string.status_connected)
+            ConnectionStatus.ERROR -> stringResource(R.string.status_error)
+        },
+        style = MaterialTheme.typography.titleMedium,
+    )
+    statusMessage?.let { message ->
+        Text(text = message, style = MaterialTheme.typography.bodyMedium)
+    }
+    revision?.let { currentRevision ->
+        Text(
+            text = stringResource(R.string.profile_revision, currentRevision),
+            style = MaterialTheme.typography.bodyMedium,
+        )
     }
 }
