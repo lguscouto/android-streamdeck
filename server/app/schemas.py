@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from typing import Annotated, Literal, TypeAlias
 from urllib.parse import urlsplit
 
@@ -42,11 +43,11 @@ class StrictModel(BaseModel):
 
     def to_wire(self) -> dict[str, object]:
         """Serialize this protocol model for transmission without unset fields."""
-        return self.model_dump(mode="json", exclude_unset=True)
+        return self.model_dump(mode="json", exclude_unset=True, exclude_none=True)
 
     def to_wire_json(self) -> str:
         """Serialize this protocol model as wire JSON without unset fields."""
-        return self.model_dump_json(exclude_unset=True)
+        return self.model_dump_json(exclude_unset=True, exclude_none=True)
 
 
 Modifier = Literal["ctrl", "alt", "shift", "win"]
@@ -63,7 +64,11 @@ MediaCommand = Literal[
 
 class HotkeyAction(StrictModel):
     type: Literal["hotkey"]
-    modifiers: list[Modifier] = Field(min_length=1, max_length=4)
+    modifiers: list[Modifier] = Field(
+        min_length=1,
+        max_length=4,
+        json_schema_extra={"uniqueItems": True},
+    )
     key: KeyName
 
     @field_validator("modifiers")
@@ -96,7 +101,7 @@ class UrlAction(StrictModel):
         Field(
             min_length=1,
             max_length=2048,
-            pattern=r"^https://[^\s\\]+$",
+            pattern=r"^https://[^\s\\\x00-\x1F\x7F]+$",
             json_schema_extra={"format": "uri"},
         ),
     ]
@@ -108,6 +113,8 @@ class UrlAction(StrictModel):
             raise ValueError("url must use https")
         if any(character.isspace() for character in url):
             raise ValueError("url must not contain whitespace")
+        if any(unicodedata.category(character) == "Cc" for character in url):
+            raise ValueError("url must not contain control characters")
         try:
             parsed = urlsplit(url)
             port = parsed.port
@@ -115,6 +122,8 @@ class UrlAction(StrictModel):
             raise ValueError("url must be a valid HTTPS URL") from exc
         if parsed.scheme != "https" or not parsed.netloc or parsed.hostname is None:
             raise ValueError("url must be a valid HTTPS URL")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("url userinfo is not allowed")
         if port is not None and not 1 <= port <= 65535:
             raise ValueError("url port must be between 1 and 65535")
         return url
@@ -219,7 +228,10 @@ class Profile(StrictModel):
 class HelloPayload(StrictModel):
     client_id: StableId
     client_version: VersionString
-    supported_protocol_versions: list[Literal[1]] = Field(min_length=1)
+    supported_protocol_versions: list[Literal[1]] = Field(
+        min_length=1,
+        json_schema_extra={"uniqueItems": True},
+    )
     requested_profile_id: StableId = Field(default_factory=lambda: None)
 
     @field_validator("supported_protocol_versions")

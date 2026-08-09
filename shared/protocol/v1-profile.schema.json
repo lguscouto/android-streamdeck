@@ -268,7 +268,7 @@
         "url": {
           "type": "string",
           "format": "uri",
-          "pattern": "^https://[^\\s]+$",
+          "pattern": "^https://[^\\s\\\\\\x00-\\x1F\\x7F]+$",
           "maxLength": 2048
         }
       }

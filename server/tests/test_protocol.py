@@ -3,13 +3,16 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ValidationError
+from referencing import Registry, Resource
 
 from app.schemas import (
     AckPayload,
     Button,
     ErrorPayload,
     HelloPayload,
+    HotkeyAction,
     MessageAdapter,
     Profile,
     ProfileChangedPayload,
@@ -25,6 +28,18 @@ INVALID_MESSAGES_FIXTURE_PATH = (
     / "fixtures"
     / "invalid-messages.json"
 )
+PROFILE_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "shared"
+    / "protocol"
+    / "v1-profile.schema.json"
+)
+MESSAGE_SCHEMA_PATH = (
+    Path(__file__).resolve().parents[2]
+    / "shared"
+    / "protocol"
+    / "v1-message.schema.json"
+)
 
 
 def load_default_profile() -> dict[str, object]:
@@ -34,6 +49,41 @@ def load_default_profile() -> dict[str, object]:
 def load_invalid_messages() -> list[dict[str, object]]:
     fixture = json.loads(INVALID_MESSAGES_FIXTURE_PATH.read_text(encoding="utf-8"))
     return fixture["mensagens"]
+
+
+def load_schema(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def local_schema_registry() -> Registry:
+    profile_schema = load_schema(PROFILE_SCHEMA_PATH)
+    message_schema = load_schema(MESSAGE_SCHEMA_PATH)
+    return Registry().with_resources(
+        [
+            (
+                profile_schema["$id"],
+                Resource.from_contents(profile_schema),
+            ),
+            (
+                message_schema["$id"],
+                Resource.from_contents(message_schema),
+            ),
+        ]
+    )
+
+
+def profile_schema_validator() -> Draft202012Validator:
+    schema = load_schema(PROFILE_SCHEMA_PATH)
+    validator = Draft202012Validator(schema, registry=local_schema_registry())
+    validator.check_schema(schema)
+    return validator
+
+
+def message_schema_validator() -> Draft202012Validator:
+    schema = load_schema(MESSAGE_SCHEMA_PATH)
+    validator = Draft202012Validator(schema, registry=local_schema_registry())
+    validator.check_schema(schema)
+    return validator
 
 
 def profile_with_single_button() -> dict[str, object]:
@@ -165,11 +215,48 @@ def test_url_action_rejects_backslashes() -> None:
         UrlAction(type="url", url=r"https://example.com\evil")
 
 
+def test_url_action_rejects_ascii_control_characters() -> None:
+    with pytest.raises(ValidationError):
+        UrlAction(type="url", url="https://example.com\x01x")
+
+
+@pytest.mark.parametrize(
+    "url", ["https://user:pass@example.com", "https://example.com:443@evil.com"]
+)
+def test_url_action_rejects_userinfo(url: str) -> None:
+    with pytest.raises(ValidationError, match="userinfo"):
+        UrlAction(type="url", url=url)
+
+
 def test_url_action_schema_matches_shared_contract() -> None:
     url_schema = UrlAction.model_json_schema()["properties"]["url"]
+    shared_url_schema = load_schema(PROFILE_SCHEMA_PATH)["$defs"]["urlAction"][
+        "properties"
+    ]["url"]
 
     assert url_schema["format"] == "uri"
-    assert url_schema["pattern"] == r"^https://[^\s\\]+$"
+    assert url_schema["pattern"] == r"^https://[^\s\\\x00-\x1F\x7F]+$"
+    assert shared_url_schema["pattern"] == url_schema["pattern"]
+
+
+def test_generated_schema_declares_unique_items_for_unique_lists() -> None:
+    hotkey_schema = HotkeyAction.model_json_schema()["properties"]["modifiers"]
+    hello_schema = HelloPayload.model_json_schema()["properties"][
+        "supported_protocol_versions"
+    ]
+
+    assert hotkey_schema["uniqueItems"] is True
+    assert hello_schema["uniqueItems"] is True
+
+
+@pytest.mark.parametrize(
+    "url", ["https://example.com\\evil", "https://example.com\x01x"]
+)
+def test_shared_profile_schema_rejects_url_security_probes(url: str) -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {"type": "url", "url": url}
+
+    assert list(profile_schema_validator().iter_errors(profile))
 
 
 def test_url_action_accepts_empty_port_as_allowed_by_shared_contract() -> None:
@@ -309,6 +396,22 @@ def test_profile_wire_omits_unset_optional_fields_instead_of_nulls() -> None:
     assert Profile.model_validate_json(profile.to_wire_json()) == profile
 
 
+def test_profile_wire_omits_none_after_nested_model_copy_update() -> None:
+    profile = Profile.model_validate(profile_with_single_button())
+    button = profile.pages[0].buttons[0].model_copy(update={"color": None})
+    page = profile.pages[0].model_copy(update={"buttons": [button]})
+    profile = profile.model_copy(update={"pages": [page]})
+
+    wire = profile.to_wire()
+    wire_button = wire["pages"][0]["buttons"][0]
+
+    assert "color" in button.model_fields_set
+    assert button.color is None
+    assert "color" not in wire_button
+    assert "color" not in json.loads(profile.to_wire_json())["pages"][0]["buttons"][0]
+    _assert_wire_contains_no_nulls(wire)
+
+
 def wire_message_examples() -> list[dict[str, object]]:
     profile = load_default_profile()
     return [
@@ -384,12 +487,111 @@ def test_messages_round_trip_through_explicit_wire_api_without_nulls(
     assert MessageAdapter.validate_json(wire_json) == parsed
 
 
+def test_all_optional_fields_round_trip_through_explicit_wire_api() -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0].update(
+        {"icon": "save", "color": "#12345678"}
+    )
+
+    messages = [
+        {
+            "protocol_version": 1,
+            "type": "hello",
+            "payload": {
+                "client_id": "android",
+                "client_version": "1.0.0",
+                "supported_protocol_versions": [1],
+                "requested_profile_id": "default",
+            },
+        },
+        {
+            "protocol_version": 1,
+            "type": "ack",
+            "payload": {
+                "request_id": "req-1",
+                "status": "completed",
+                "message": "Saved",
+            },
+        },
+        {
+            "protocol_version": 1,
+            "type": "error",
+            "payload": {
+                "request_id": "req-1",
+                "code": "TEMPORARY_FAILURE",
+                "message": "Try again",
+                "retryable": True,
+            },
+        },
+        {
+            "protocol_version": 1,
+            "type": "profile_snapshot",
+            "payload": {"profile": profile},
+        },
+        {
+            "protocol_version": 1,
+            "type": "profile_changed",
+            "payload": {
+                "profile_id": "default",
+                "revision": 2,
+                "reason": "updated",
+            },
+        },
+    ]
+
+    for message in messages:
+        parsed = MessageAdapter.validate_python(message)
+        wire = parsed.to_wire()
+        wire_json = parsed.to_wire_json()
+
+        assert wire == json.loads(wire_json)
+        assert MessageAdapter.validate_python(wire) == parsed
+        assert MessageAdapter.validate_json(wire_json) == parsed
+
+
 @pytest.mark.parametrize(
     "fixture", load_invalid_messages(), ids=lambda fixture: str(fixture["id"])
 )
 def test_invalid_message_fixtures_are_rejected(fixture: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         MessageAdapter.validate_python(fixture["message"])
+
+
+@pytest.mark.parametrize(
+    "fixture", load_invalid_messages(), ids=lambda fixture: str(fixture["id"])
+)
+def test_invalid_message_fixtures_are_rejected_by_local_draft_2020_12_schema(
+    fixture: dict[str, object], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_if_network_is_used(*args: object, **kwargs: object) -> None:
+        raise AssertionError("JSON Schema resolution must not use the network")
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_if_network_is_used)
+
+    errors = list(message_schema_validator().iter_errors(fixture["message"]))
+
+    assert errors, fixture["id"]
+
+
+def test_local_draft_2020_12_registry_validates_profile_reference_without_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_if_network_is_used(*args: object, **kwargs: object) -> None:
+        raise AssertionError("JSON Schema resolution must not use the network")
+
+    monkeypatch.setattr("urllib.request.urlopen", fail_if_network_is_used)
+
+    profile = load_default_profile()
+    profile_errors = list(profile_schema_validator().iter_errors(profile))
+    message = {
+        "protocol_version": 1,
+        "type": "profile_snapshot",
+        "payload": {"profile": profile},
+    }
+    message_errors = list(message_schema_validator().iter_errors(message))
+
+    assert not profile_errors
+    assert not message_errors
 
 
 def test_all_message_variants_are_accepted() -> None:
