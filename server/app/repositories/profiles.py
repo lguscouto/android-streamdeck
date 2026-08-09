@@ -42,6 +42,8 @@ class ProfileRepository:
     def seed_profile(self, profile: Profile | Mapping[str, Any]) -> Profile:
         """Insert a profile once, treating an identical subsequent seed as a no-op."""
         wire = _validated_wire(profile)
+        if wire["revision"] != 1:
+            raise ProfileConflictError("seed profiles must start at revision 1")
         reason = "created"
         try:
             with self.database.transaction() as connection:

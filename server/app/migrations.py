@@ -3,6 +3,9 @@ from __future__ import annotations
 import sqlite3
 
 LATEST_SCHEMA_VERSION = 1
+_REQUIRED_TABLES = frozenset(
+    {"profiles", "pages", "buttons", "actions", "profile_revisions"}
+)
 
 
 class MigrationError(RuntimeError):
@@ -95,6 +98,16 @@ def _foreign_keys_enabled(connection: sqlite3.Connection) -> bool:
     return connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
+def _schema_is_complete(connection: sqlite3.Connection) -> bool:
+    tables = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
+    }
+    return _REQUIRED_TABLES.issubset(tables)
+
+
 def migrate(connection: sqlite3.Connection) -> None:
     """Apply the ordered schema migrations in one transaction."""
     if connection.in_transaction:
@@ -109,6 +122,8 @@ def migrate(connection: sqlite3.Connection) -> None:
     if current_version > LATEST_SCHEMA_VERSION:
         raise MigrationError("database schema version is newer than this server")
     if current_version == LATEST_SCHEMA_VERSION:
+        if not _schema_is_complete(connection):
+            raise MigrationError("database schema is incomplete")
         return
 
     try:

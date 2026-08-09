@@ -9,7 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.db import Database
-from app.migrations import LATEST_SCHEMA_VERSION
+from app.migrations import LATEST_SCHEMA_VERSION, MigrationError, migrate
 from app.repositories.profiles import (
     ProfileConflictError,
     ProfileNotFoundError,
@@ -97,6 +97,54 @@ def test_in_memory_database_stays_initialized_across_connections() -> None:
     profile = load_profile()
     assert repository.seed_profile(profile) == profile
     assert repository.get_profile("default") == profile
+
+
+def test_seed_profile_requires_initial_revision_one(tmp_path: Path) -> None:
+    database = Database(tmp_path / "streamdeck.sqlite3")
+    repository = ProfileRepository(database)
+    repository.initialize()
+
+    with pytest.raises(ProfileConflictError):
+        repository.seed_profile(load_profile(revision=2))
+
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM profiles").fetchone()[0] == 0
+
+
+def test_migration_rejects_version_one_without_required_tables(tmp_path: Path) -> None:
+    database = Database(tmp_path / "streamdeck.sqlite3")
+    with database.connect() as connection:
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+
+    with database.connect() as connection:
+        with pytest.raises(MigrationError, match="incomplete"):
+            migrate(connection)
+
+
+def test_database_initialize_closes_connection_after_migration_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class TrackingConnection(sqlite3.Connection):
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+            super().close()
+
+    connection = sqlite3.connect(":memory:", factory=TrackingConnection)
+    database = Database(tmp_path / "streamdeck.sqlite3")
+
+    def fail_migration(_connection: sqlite3.Connection) -> None:
+        raise MigrationError("synthetic migration failure")
+
+    monkeypatch.setattr(database, "connect", lambda: connection)
+    monkeypatch.setattr("app.db.migrate", fail_migration)
+
+    with pytest.raises(MigrationError, match="synthetic"):
+        database.initialize()
+
+    assert connection.closed
 
 
 def test_foreign_keys_and_layout_constraints_reject_orphans_and_duplicates(

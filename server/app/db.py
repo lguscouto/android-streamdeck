@@ -84,8 +84,11 @@ class Database:
 
     def initialize(self) -> None:
         """Apply all migrations to the configured database."""
-        with self.connect() as connection:
+        connection = self.connect()
+        try:
             migrate(connection)
+        finally:
+            connection.close()
 
     migrate = initialize
 
