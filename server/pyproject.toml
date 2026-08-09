@@ -8,12 +8,18 @@ dependencies = [
     "uvicorn[standard]>=0.35,<1.0",
 ]
 
+[project.scripts]
+streamdeck-server = "app.runner:main"
+
 [dependency-groups]
 dev = [
     "httpx>=0.28,<1.0",
     "pytest>=8.4,<9.0",
     "ruff>=0.12,<1.0",
 ]
+
+[tool.uv]
+package = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

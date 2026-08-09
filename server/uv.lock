@@ -5,7 +5,7 @@ requires-python = ">=3.11, <3.15"
 [[package]]
 name = "android-streamdeck-server"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "uvicorn", extra = ["standard"] },
