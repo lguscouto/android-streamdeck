@@ -42,6 +42,18 @@ class ClientSession:
     client_id: str
     profile_id: str
     responses: dict[str, str] = field(default_factory=dict)
+    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    ready: bool = False
+    pending_messages: list[str] = field(default_factory=list)
+
+
+async def _send_session_text(
+    websocket: WebSocket,
+    session: ClientSession,
+    message: str,
+) -> None:
+    async with session.send_lock:
+        await websocket.send_text(message)
 
 
 class WebSocketManager:
@@ -93,10 +105,14 @@ class WebSocketManager:
         for websocket, session in tuple(self._sessions.items()):
             if session.profile_id != profile_id:
                 continue
-            try:
-                await websocket.send_text(message)
-            except Exception:
-                stale.append(websocket)
+            async with session.send_lock:
+                if not session.ready:
+                    session.pending_messages.append(message)
+                    continue
+                try:
+                    await websocket.send_text(message)
+                except Exception:
+                    stale.append(websocket)
         for websocket in stale:
             await self.unregister(websocket)
 
@@ -125,6 +141,7 @@ async def _send_error(
     *,
     request_id: str | None = None,
     retryable: bool = False,
+    session: ClientSession | None = None,
 ) -> str:
     wire = _error_message(
         code,
@@ -132,7 +149,10 @@ async def _send_error(
         request_id=request_id,
         retryable=retryable,
     ).to_wire_json()
-    await websocket.send_text(wire)
+    if session is None:
+        await websocket.send_text(wire)
+    else:
+        await _send_session_text(websocket, session, wire)
     return wire
 
 
@@ -172,7 +192,7 @@ async def _handle_press(
     request_id = message.payload.request_id
     previous = session.responses.get(request_id)
     if previous is not None:
-        await websocket.send_text(previous)
+        await _send_session_text(websocket, session, previous)
         return
 
     if message.payload.profile_id != session.profile_id:
@@ -181,6 +201,7 @@ async def _handle_press(
             "PROFILE_NOT_SELECTED",
             "Profile is not selected for this session",
             request_id=request_id,
+            session=session,
         )
         _cache_response(session, request_id, wire)
         return
@@ -196,6 +217,7 @@ async def _handle_press(
             "PROFILE_NOT_FOUND",
             "Profile not found",
             request_id=request_id,
+            session=session,
         )
         _cache_response(session, request_id, wire)
         return
@@ -205,6 +227,7 @@ async def _handle_press(
             "INTERNAL_ERROR",
             "Internal server error",
             request_id=request_id,
+            session=session,
         )
         _cache_response(session, request_id, wire)
         return
@@ -216,6 +239,7 @@ async def _handle_press(
             "Profile revision conflict",
             request_id=request_id,
             retryable=True,
+            session=session,
         )
         _cache_response(session, request_id, wire)
         return
@@ -234,6 +258,7 @@ async def _handle_press(
             "PAGE_NOT_FOUND",
             "Page not found",
             request_id=request_id,
+            session=session,
         )
         _cache_response(session, request_id, wire)
         return
@@ -252,6 +277,7 @@ async def _handle_press(
             "BUTTON_NOT_FOUND",
             "Button not found",
             request_id=request_id,
+            session=session,
         )
         _cache_response(session, request_id, wire)
         return
@@ -266,7 +292,7 @@ async def _handle_press(
         ),
     ).to_wire_json()
     _cache_response(session, request_id, ack)
-    await websocket.send_text(ack)
+    await _send_session_text(websocket, session, ack)
 
 
 def _cache_response(session: ClientSession, request_id: str, wire: str) -> None:
@@ -329,25 +355,29 @@ async def _serve_websocket(
             profile_id=profile.id,
         )
         await manager.register(websocket, session)
-        await websocket.send_text(
-            WelcomeMessage(
-                protocol_version=1,
-                type="welcome",
-                payload=WelcomePayload(
-                    server_id=manager.server_id,
-                    server_version=manager.server_version,
-                    profile_id=profile.id,
-                    revision=profile.revision,
-                ),
-            ).to_wire_json()
-        )
-        await websocket.send_text(
-            ProfileSnapshotMessage(
-                protocol_version=1,
-                type="profile_snapshot",
-                payload={"profile": profile},
-            ).to_wire_json()
-        )
+        welcome_wire = WelcomeMessage(
+            protocol_version=1,
+            type="welcome",
+            payload=WelcomePayload(
+                server_id=manager.server_id,
+                server_version=manager.server_version,
+                profile_id=profile.id,
+                revision=profile.revision,
+            ),
+        ).to_wire_json()
+        snapshot_wire = ProfileSnapshotMessage(
+            protocol_version=1,
+            type="profile_snapshot",
+            payload={"profile": profile},
+        ).to_wire_json()
+        async with session.send_lock:
+            await websocket.send_text(welcome_wire)
+            await websocket.send_text(snapshot_wire)
+            session.ready = True
+            pending_messages = tuple(session.pending_messages)
+            session.pending_messages.clear()
+            for pending_message in pending_messages:
+                await websocket.send_text(pending_message)
 
         while True:
             try:
@@ -360,6 +390,7 @@ async def _serve_websocket(
                     "IDLE_TIMEOUT",
                     "WebSocket session timed out",
                     retryable=True,
+                    session=session,
                 )
                 await websocket.close(code=1000)
                 return
@@ -368,7 +399,9 @@ async def _serve_websocket(
 
             message = _parse_message(raw_message)
             if isinstance(message, PingMessage):
-                await websocket.send_text(
+                await _send_session_text(
+                    websocket,
+                    session,
                     PongMessage(
                         protocol_version=1,
                         type="pong",
@@ -382,6 +415,7 @@ async def _serve_websocket(
                     websocket,
                     "UNEXPECTED_MESSAGE",
                     "Message is not valid in this session state",
+                    session=session,
                 )
     except WebSocketDisconnect:
         return

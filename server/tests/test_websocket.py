@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -57,6 +58,36 @@ def test_websocket_handshake_sends_welcome_and_snapshot(tmp_path: Path) -> None:
     assert snapshot["type"] == "profile_snapshot"
     assert snapshot["payload"]["profile"]["id"] == "default"
     assert snapshot["payload"]["profile"]["revision"] == 1
+
+
+def test_websocket_handshake_queues_concurrent_profile_change_after_snapshot(
+    tmp_path: Path,
+) -> None:
+    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    repository = seeded_app.state.profile_repository
+
+    class BroadcastDuringHandshake(WebSocketManager):
+        async def register(self, websocket, session) -> None:
+            await super().register(websocket, session)
+            asyncio.create_task(
+                self.broadcast_profile_changed("default", 2, reason="updated")
+            )
+
+    manager = BroadcastDuringHandshake(repository)
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+        websocket_manager=manager,
+    )
+    with TestClient(app).websocket_connect("/api/v1/ws") as websocket:
+        websocket.send_json(hello_message())
+        frames = [websocket.receive_json() for _ in range(3)]
+
+    assert [frame["type"] for frame in frames] == [
+        "welcome",
+        "profile_snapshot",
+        "profile_changed",
+    ]
 
 
 def test_websocket_ping_returns_same_nonce_as_pong(tmp_path: Path) -> None:
