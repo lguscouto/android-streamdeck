@@ -1,0 +1,40 @@
+# Android and Gradle build output
+**/build/
+.gradle/
+**/.gradle/
+*.apk
+*.aab
+
+# Python environments and caches
+.venv/
+**/.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+server/data/
+
+# ADB exports, bugreports, and dumps
+adb-dumps/
+**/adb-dumps/
+*.adb
+*.adb-dump
+*.bugreport
+*.bugreport.zip
+*.dump
+
+# Logs and OS/editor metadata
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

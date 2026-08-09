@@ -1,0 +1,161 @@
+{
+  "descricao": "Amostras intencionalmente inválidas; valide cada objeto em mensagens[].message contra v1-message.schema.json.",
+  "mensagens": [
+    {
+      "id": "unknown-type",
+      "motivo": "type não pertence ao enum fechado e o payload tenta enviar command livre.",
+      "message": {
+        "protocol_version": 1,
+        "type": "execute_shell",
+        "payload": {
+          "command": "não-permitido"
+        }
+      }
+    },
+    {
+      "id": "press-without-button-id",
+      "motivo": "press exige request_id, profile_id, page_id, button_id e revision.",
+      "message": {
+        "protocol_version": 1,
+        "type": "press",
+        "payload": {
+          "request_id": "req-invalid-001",
+          "profile_id": "default",
+          "page_id": "main",
+          "revision": 1
+        }
+      }
+    },
+    {
+      "id": "unknown-action-type",
+      "motivo": "action.type não pertence ao enum fechado; shell não é uma ação do protocolo.",
+      "message": {
+        "protocol_version": 1,
+        "type": "profile_snapshot",
+        "payload": {
+          "profile": {
+            "protocol_version": 1,
+            "id": "invalid-action",
+            "name": "Perfil inválido",
+            "revision": 1,
+            "active_page_id": "main",
+            "pages": [
+              {
+                "id": "main",
+                "title": "Principal",
+                "order": 0,
+                "rows": 1,
+                "columns": 1,
+                "buttons": [
+                  {
+                    "id": "bad-action",
+                    "row": 0,
+                    "column": 0,
+                    "title": "Ação inválida",
+                    "action": {
+                      "type": "shell",
+                      "command": "não-permitido"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "shell-at-envelope",
+      "motivo": "propriedades desconhecidas no envelope são rejeitadas; shell nunca faz parte de press.",
+      "message": {
+        "protocol_version": 1,
+        "type": "press",
+        "shell": "não-permitido",
+        "payload": {
+          "request_id": "req-invalid-002",
+          "profile_id": "default",
+          "page_id": "main",
+          "button_id": "documentation",
+          "revision": 1
+        }
+      }
+    },
+    {
+      "id": "command-in-application",
+      "motivo": "application aceita apenas app_id; command adicional é propriedade desconhecida.",
+      "message": {
+        "protocol_version": 1,
+        "type": "profile_snapshot",
+        "payload": {
+          "profile": {
+            "protocol_version": 1,
+            "id": "invalid-command",
+            "name": "Perfil inválido",
+            "revision": 1,
+            "active_page_id": "main",
+            "pages": [
+              {
+                "id": "main",
+                "title": "Principal",
+                "order": 0,
+                "rows": 1,
+                "columns": 1,
+                "buttons": [
+                  {
+                    "id": "bad-application",
+                    "row": 0,
+                    "column": 0,
+                    "title": "Aplicativo inválido",
+                    "action": {
+                      "type": "application",
+                      "app_id": "editor",
+                      "command": "não-permitido"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "arbitrary-media-command",
+      "motivo": "media.command existe, mas só aceita os comandos multimídia enumerados.",
+      "message": {
+        "protocol_version": 1,
+        "type": "profile_snapshot",
+        "payload": {
+          "profile": {
+            "protocol_version": 1,
+            "id": "invalid-media-command",
+            "name": "Perfil inválido",
+            "revision": 1,
+            "active_page_id": "main",
+            "pages": [
+              {
+                "id": "main",
+                "title": "Principal",
+                "order": 0,
+                "rows": 1,
+                "columns": 1,
+                "buttons": [
+                  {
+                    "id": "bad-media",
+                    "row": 0,
+                    "column": 0,
+                    "title": "Mídia inválida",
+                    "action": {
+                      "type": "media",
+                      "command": "não-permitido"
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

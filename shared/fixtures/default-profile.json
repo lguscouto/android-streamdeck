@@ -1,0 +1,58 @@
+{
+  "protocol_version": 1,
+  "id": "default",
+  "name": "Perfil padrão",
+  "revision": 1,
+  "active_page_id": "main",
+  "pages": [
+    {
+      "id": "main",
+      "title": "Principal",
+      "order": 0,
+      "rows": 2,
+      "columns": 2,
+      "buttons": [
+        {
+          "id": "save-shortcut",
+          "row": 0,
+          "column": 0,
+          "title": "Atalho Ctrl+Shift+S",
+          "icon": "keyboard",
+          "color": "#4CAF50",
+          "action": {
+            "type": "hotkey",
+            "modifiers": [
+              "ctrl",
+              "shift"
+            ],
+            "key": "S"
+          }
+        },
+        {
+          "id": "media-play-pause",
+          "row": 0,
+          "column": 1,
+          "title": "Reproduzir/pausar",
+          "icon": "play_pause",
+          "color": "#2196F3",
+          "action": {
+            "type": "media",
+            "command": "play_pause"
+          }
+        },
+        {
+          "id": "documentation",
+          "row": 1,
+          "column": 0,
+          "title": "Documentação",
+          "icon": "book",
+          "color": "#607D8B",
+          "action": {
+            "type": "url",
+            "url": "https://developer.android.com/"
+          }
+        }
+      ]
+    }
+  ]
+}

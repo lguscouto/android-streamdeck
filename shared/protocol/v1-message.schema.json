@@ -1,0 +1,448 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://android-streamdeck.local/schemas/v1-message.schema.json",
+  "title": "Mensagem do protocolo Android Stream Deck v1",
+  "description": "Envelope fechado para mensagens entre cliente Android e servidor Windows.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol_version",
+    "type",
+    "payload"
+  ],
+  "properties": {
+    "protocol_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "hello",
+        "welcome",
+        "press",
+        "ack",
+        "error",
+        "ping",
+        "pong",
+        "profile_snapshot",
+        "profile_changed"
+      ]
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/helloMessage"
+    },
+    {
+      "$ref": "#/$defs/welcomeMessage"
+    },
+    {
+      "$ref": "#/$defs/pressMessage"
+    },
+    {
+      "$ref": "#/$defs/ackMessage"
+    },
+    {
+      "$ref": "#/$defs/errorMessage"
+    },
+    {
+      "$ref": "#/$defs/pingMessage"
+    },
+    {
+      "$ref": "#/$defs/pongMessage"
+    },
+    {
+      "$ref": "#/$defs/profileSnapshotMessage"
+    },
+    {
+      "$ref": "#/$defs/profileChangedMessage"
+    }
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    },
+    "versionString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "helloMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "hello"
+        },
+        "payload": {
+          "$ref": "#/$defs/helloPayload"
+        }
+      }
+    },
+    "welcomeMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "welcome"
+        },
+        "payload": {
+          "$ref": "#/$defs/welcomePayload"
+        }
+      }
+    },
+    "pressMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "press"
+        },
+        "payload": {
+          "$ref": "#/$defs/pressPayload"
+        }
+      }
+    },
+    "ackMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "ack"
+        },
+        "payload": {
+          "$ref": "#/$defs/ackPayload"
+        }
+      }
+    },
+    "errorMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "error"
+        },
+        "payload": {
+          "$ref": "#/$defs/errorPayload"
+        }
+      }
+    },
+    "pingMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "ping"
+        },
+        "payload": {
+          "$ref": "#/$defs/noncePayload"
+        }
+      }
+    },
+    "pongMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "pong"
+        },
+        "payload": {
+          "$ref": "#/$defs/noncePayload"
+        }
+      }
+    },
+    "profileSnapshotMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "profile_snapshot"
+        },
+        "payload": {
+          "$ref": "#/$defs/profileSnapshotPayload"
+        }
+      }
+    },
+    "profileChangedMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "type",
+        "payload"
+      ],
+      "properties": {
+        "protocol_version": {
+          "const": 1
+        },
+        "type": {
+          "const": "profile_changed"
+        },
+        "payload": {
+          "$ref": "#/$defs/profileChangedPayload"
+        }
+      }
+    },
+    "helloPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_id",
+        "client_version",
+        "supported_protocol_versions"
+      ],
+      "properties": {
+        "client_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "client_version": {
+          "$ref": "#/$defs/versionString"
+        },
+        "supported_protocol_versions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "const": 1
+          }
+        },
+        "requested_profile_id": {
+          "$ref": "#/$defs/stableId"
+        }
+      }
+    },
+    "welcomePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "server_id",
+        "server_version",
+        "profile_id",
+        "revision"
+      ],
+      "properties": {
+        "server_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "server_version": {
+          "$ref": "#/$defs/versionString"
+        },
+        "profile_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "pressPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "profile_id",
+        "page_id",
+        "button_id",
+        "revision"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "profile_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "page_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "button_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ackPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "status"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "accepted",
+            "completed",
+            "rejected"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      }
+    },
+    "errorPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "request_id": {
+          "$ref": "#/$defs/requestId"
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Z0-9][A-Z0-9._-]{0,63}$"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "noncePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nonce"
+      ],
+      "properties": {
+        "nonce": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "profileSnapshotPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile"
+      ],
+      "properties": {
+        "profile": {
+          "$ref": "v1-profile.schema.json"
+        }
+      }
+    },
+    "profileChangedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "revision"
+      ],
+      "properties": {
+        "profile_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "created",
+            "updated",
+            "deleted"
+          ]
+        }
+      }
+    }
+  }
+}
