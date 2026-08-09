@@ -56,7 +56,11 @@ Esta matriz separa o inventário verificado no host das escolhas provisórias pa
 
 O servidor escuta em um endereço configurável da máquina Windows e o Android conecta-se ao IP/porta informados na mesma rede local. O MVP não pressupõe exposição à internet, encaminhamento de portas ou dependência de serviço em nuvem. A implementação deve tratar desconexão, reconexão controlada, timeout e servidor indisponível como estados normais.
 
-Mesmo em rede local, a superfície deve ser limitada: autenticação/token local e validação de origem podem ser adicionados conforme o fluxo de configuração for implementado. Nenhuma credencial deve ser armazenada no repositório.
+Mesmo em rede local, a superfície deve ser limitada. Na Fase 1 o servidor
+permanece em `127.0.0.1`: o WebSocket ainda não possui pareamento ou
+autenticação e o cliente Android ainda não está conectado. O bind em outra
+interface só deve ser considerado depois da implementação desses controles na
+Fase 2. Nenhuma credencial deve ser armazenada no repositório.
 
 ## Limite de segurança: sem shell command arbitrário
 

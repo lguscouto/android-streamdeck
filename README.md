@@ -15,7 +15,39 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 - Estados básicos de conexão, execução, sucesso e erro visíveis no aplicativo.
 - Sem acesso pela internet, sem sincronização em nuvem e sem execução de shell command arbitrário.
 
-Esta tarefa cria apenas o esqueleto e a documentação; a implementação Android e do servidor será feita nas próximas tarefas.
+## Estado atual
+
+A **Fase 1 do servidor** está implementada localmente:
+
+- SQLite versionado com migração, FKs e histórico de revisões;
+- seed idempotente do perfil padrão e recuperação segura após reinício;
+- API HTTP versionada em `/api/v1` para perfil, snapshots, catálogo de ações e
+  atualização otimista por revisão;
+- WebSocket em `/api/v1/ws` com `hello`, `welcome`, snapshot, ping/pong,
+  validação de `press`, `ack`/`error`, timeout e `profile_changed`;
+- envelopes fechados, sem shell/command arbitrário;
+- respostas de erro sanitizadas, sem SQL, caminhos, segredos ou tracebacks.
+
+Acesso local padrão:
+
+- Health: `http://127.0.0.1:8765/health`
+- API: `http://127.0.0.1:8765/api/v1`
+- WebSocket: `ws://127.0.0.1:8765/api/v1/ws`
+
+O bind padrão é loopback. Pareamento, autenticação, cliente Android conectado,
+adaptadores de execução de ações e exposição segura na LAN permanecem nas fases
+seguintes. Nesta fase, um `press` válido é reconhecido, mas retorna `rejected`
+porque a execução ainda não foi habilitada.
+
+Validação atual do servidor:
+
+```bash
+cd E:/projetos/android-streamdeck/server
+env -u PYTHONPATH -u VIRTUAL_ENV uv run pytest -q
+env -u PYTHONPATH -u VIRTUAL_ENV uv run ruff check .
+env -u PYTHONPATH -u VIRTUAL_ENV uv run python -m compileall -q app
+uv lock --check
+```
 
 ## Estrutura
 
@@ -28,18 +60,21 @@ android-streamdeck/
 └── scripts/    # Scripts auxiliares de desenvolvimento
 ```
 
-## Próximos comandos
-
-Os comandos abaixo são os próximos passos previstos após o scaffold:
+## Executar o servidor local
 
 ```bash
-cd E:/projetos/android-streamdeck
-
-# Verificar a árvore e o estado do repositório
-git status --short --branch
-
-# Próximas tarefas: criar o projeto Android e o ambiente do servidor
-# (os comandos concretos serão adicionados quando essas tarefas forem executadas)
+cd E:/projetos/android-streamdeck/server
+uv run streamdeck-server
 ```
 
-Consulte [`docs/architecture.md`](docs/architecture.md) antes de implementar novos fluxos de rede ou ações.
+Com os valores padrão, consulte `http://127.0.0.1:8765/health`. Para
+configurar uma base SQLite diferente, defina `STREAMDECK_DATABASE_PATH`; o
+padrão é `server/data/streamdeck.sqlite3`, ignorado pelo Git. Consulte
+[`server/README.md`](server/README.md) para o contrato HTTP e WebSocket.
+
+## Próximas fases
+
+- Fase 2: pareamento, autenticação do WebSocket e cliente Android de rede;
+- Fase 3: grade funcional e primeira ação end-to-end;
+- fases seguintes: editor, perfis, descoberta, empacotamento, hardening e
+  release verificável.
