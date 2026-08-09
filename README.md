@@ -17,8 +17,9 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 
 ## Estado atual
 
-As **Fases 1, 2 e 3** estão implementadas e validadas no `Pixel_8`.
-A Fase 3 entrega a primeira ação autenticada ponta a ponta.
+As **Fases 1, 2, 3 e 4** estão implementadas e validadas no `Pixel_8`.
+A Fase 4 adiciona o editor de perfis, salvamento otimista, auditoria sanitizada
+e adaptadores Windows fechados adicionais.
 
 ### Fase 1 — servidor e contratos
 
@@ -55,8 +56,23 @@ A Fase 3 entrega a primeira ação autenticada ponta a ponta.
   `Concluído` ou `Erro`, com bloqueio durante execução;
 - smoke UiAutomator no `Pixel_8` comprovou pareamento, WebSocket, grade, hotkey
   registrada, rejeição segura e reconexão criptografada;
-- `media`, `text`, `url`, `key` e `application` continuam rejeitadas até que
-  recebam adaptadores específicos, testados e seguros.
+- a execução de `media`, `text`, `url` e `key` passou a ser feita por adaptadores
+  específicos, fechados e testados na Fase 4; `application` continua rejeitada
+  até receber um adaptador seguro baseado em catálogo permitido.
+
+### Fase 4 — editor, revisões e adaptadores adicionais
+
+- editor Compose do perfil ativo com draft, preview da grade e formulários por
+  tipo de ação;
+- `PUT` autenticado com `expected_revision`, conflito retryable e auditoria de
+  metadados sem snapshot;
+- adaptadores fechados e testados para `key`, `media`, `text` e `url`;
+- `application` permanece fail-closed, sem caminho ou processo arbitrário;
+- smoke E2E no `Pixel_8` comprovou pareamento, hotkey/mídia controladas, edição
+  do botão, revisão 2, reconexão com token cifrado e persistência.
+
+Consulte [`docs/phase-4-delivery.md`](docs/phase-4-delivery.md) para os contratos,
+limites e comandos de validação.
 
 ### Acesso local padrão
 
@@ -108,6 +124,6 @@ padrão é `server/data/streamdeck.sqlite3`, ignorado pelo Git. Consulte
 
 ## Próximas fases
 
-- Fase 4: editor de perfis/layouts, novos adaptadores fechados e recarga do
-  snapshot após alterações remotas;
-- fases posteriores: descoberta, TLS/mTLS, empacotamento e release verificável.
+- Fase 5: descoberta segura, hardening de transporte (TLS/mTLS) e gestão de
+  dispositivos;
+- fases posteriores: empacotamento e release verificável.

@@ -104,22 +104,26 @@ Falhas usam sempre a forma sanitizada:
 {"code":"PROFILE_REVISION_CONFLICT","message":"Profile revision conflict","retryable":true}
 ```
 
-O servidor não executa shell, `command`, `subprocess` ou ações arbitrárias.
+O servidor não executa shell, `command`, `subprocess` ou ações arbitrárias. A
+atualização de perfil usa revisão otimista; a auditoria está disponível em:
 
-## Execução de ações — Fase 3
+```text
+GET /api/v1/profiles/{profile_id}/audit?limit=50
+```
 
-O registry do servidor está fechado. Nesta etapa, somente a ação `hotkey` possui
-adaptador ativo: modificadores e tecla são transformados por um mapa interno de
-virtual keys e emitidos no Windows por `keybd_event`. Nenhum comando de shell,
-caminho ou argumento livre é montado a partir do cliente.
+Essa rota devolve somente revisão, timestamp, origem e motivo; nunca devolve o
+snapshot persistido.
 
-O cliente Android valida o snapshot, envia somente IDs/revisão no `press` e
-associa o `ack` ou `error` ao botão pelo `request_id`. O perfil de desenvolvimento
-fornece uma grade de 3 colunas × 5 linhas para a página principal.
+## Execução de ações — Fase 4
 
-As ações `key`, `media`, `text`, `url` e `application` continuam sem adaptador e
-recebem `ack` com `status: "rejected"`. Elas só serão habilitadas com contratos e
-testes específicos nas próximas fases.
+O registry permanece fechado. Além de `hotkey`, há adaptadores específicos para
+`key`, `media`, `text` e `url`. `application` continua explicitamente rejeitada
+até existir um catálogo seguro de aplicativos permitidos. Nenhum tipo aceita
+shell, caminho livre ou payload executável enviado pelo Android.
+
+O cliente Android valida o snapshot e envia somente IDs/revisão no `press`. O
+perfil de desenvolvimento fornece uma grade de 3 colunas × 5 linhas para a
+página principal.
 
 ## WebSocket e limites
 

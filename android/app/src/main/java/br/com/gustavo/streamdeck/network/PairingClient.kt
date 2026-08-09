@@ -67,6 +67,39 @@ class PairingClient(
         }
     }
 
+    suspend fun updateProfile(
+        endpoint: ServerEndpoint,
+        clientId: String,
+        accessToken: String,
+        profileId: String,
+        expectedRevision: Int,
+        profileWire: String,
+    ): String = withContext(Dispatchers.IO) {
+        require(clientId.isNotBlank()) { "client id is required" }
+        require(accessToken.isNotBlank()) { "access token is required" }
+        val request = Request.Builder()
+            .url(endpoint.profileUpdateUrl(profileId, expectedRevision))
+            .header("Authorization", "Bearer $accessToken")
+            .header("X-StreamDeck-Client-Id", clientId)
+            .put(profileWire.toRequestBody(JSON_MEDIA_TYPE))
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                val error = runCatching { JSONObject(body) }.getOrNull()
+                throw PairingException(
+                    code = error?.optString("code").orEmpty().ifEmpty { "PROFILE_UPDATE_FAILED" },
+                    message = error?.optString("message").orEmpty()
+                        .ifEmpty { "Profile update failed" },
+                )
+            }
+            if (body.isBlank()) {
+                throw PairingException("INVALID_RESPONSE", "Profile update response is empty")
+            }
+            return@use body
+        }
+    }
+
     companion object {
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }

@@ -197,6 +197,47 @@ class ProfileRepository:
             raise ProfileRepositoryError("profile persistence failed") from exc
         return Profile.model_validate(wire)
 
+    def list_audit(
+        self,
+        profile_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """Return revision metadata without exposing stored profile snapshots."""
+        if not 1 <= limit <= 100:
+            raise ProfileRepositoryError("audit limit is invalid")
+        connection = self.database.connect()
+        try:
+            exists = connection.execute(
+                "SELECT 1 FROM profiles WHERE id = ?", (profile_id,)
+            ).fetchone()
+            if exists is None:
+                raise ProfileNotFoundError("profile not found")
+            rows = connection.execute(
+                """
+                SELECT revision, reason, created_at
+                FROM profile_revisions
+                WHERE profile_id = ?
+                ORDER BY revision ASC
+                LIMIT ?
+                """,
+                (profile_id, limit),
+            ).fetchall()
+            return [
+                {
+                    "revision": int(row["revision"]),
+                    "reason": str(row["reason"]),
+                    "created_at": str(row["created_at"]),
+                }
+                for row in rows
+            ]
+        except ProfileRepositoryError:
+            raise
+        except sqlite3.Error as exc:
+            raise ProfileRepositoryError("profile audit lookup failed") from exc
+        finally:
+            connection.close()
+
     def set_active_profile(self, profile_id: str) -> None:
         """Select exactly one existing profile as active."""
         try:

@@ -76,6 +76,7 @@ def create_app(
             repository,
             active_websocket_manager,
             pairing_service,
+            require_auth=runtime_settings.require_auth,
         )
     )
     application.include_router(

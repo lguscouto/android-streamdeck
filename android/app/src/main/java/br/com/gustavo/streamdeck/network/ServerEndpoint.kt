@@ -8,7 +8,15 @@ class ServerEndpoint private constructor(
     val websocketUrl: String,
     val pairingUrl: String,
 ) {
+    fun profileUpdateUrl(profileId: String, expectedRevision: Int): String {
+        require(STABLE_ID.matches(profileId)) { "profile id is invalid" }
+        require(expectedRevision >= 1) { "profile revision must be positive" }
+        return "$httpBaseUrl/api/v1/profiles/$profileId?expected_revision=$expectedRevision"
+    }
+
     companion object {
+        private val STABLE_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
         fun parse(raw: String): ServerEndpoint {
             val normalized = raw.trim().trimEnd('/')
             require(normalized.isNotEmpty()) { "server endpoint is empty" }

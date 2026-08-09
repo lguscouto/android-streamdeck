@@ -32,6 +32,9 @@ adb-dumps/
 *.bugreport.zip
 *.dump
 
+# Hermes local plans and runtime artifacts
+.hermes/
+
 # Logs and OS/editor metadata
 *.log
 .DS_Store

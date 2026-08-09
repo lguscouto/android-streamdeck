@@ -41,13 +41,14 @@ def request(
     path: str,
     *,
     json_body: Any = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     async def send() -> httpx.Response:
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
             transport=transport, base_url="http://test"
         ) as client:
-            return await client.request(method, path, json=json_body)
+            return await client.request(method, path, json=json_body, headers=headers)
 
     return asyncio.run(send())
 
@@ -414,3 +415,110 @@ def test_create_app_exposes_runtime_dependencies_on_state(tmp_path: Path) -> Non
     assert app.state.database is repository.database
     assert app.state.profile_repository is repository
     assert app.state.websocket_manager is manager
+
+
+def test_put_requires_client_authentication_when_remote_auth_is_enabled(
+    tmp_path: Path,
+) -> None:
+    app = create_app(
+        Settings(
+            host="192.0.2.10",
+            pairing_code="phase4-code",
+            require_auth=True,
+            database_path=tmp_path / "streamdeck.sqlite3",
+        )
+    )
+    unauthenticated = request(
+        app,
+        "PUT",
+        "/api/v1/profiles/default?expected_revision=1",
+        json_body=updated_profile_payload(),
+    )
+    assert unauthenticated.status_code == 401
+    assert unauthenticated.json() == {
+        "code": "AUTH_REQUIRED",
+        "message": "Authentication required",
+        "retryable": False,
+    }
+    unauthenticated_read = request(
+        app,
+        "GET",
+        "/api/v1/profiles/default/snapshot",
+    )
+    assert unauthenticated_read.status_code == 401
+    assert unauthenticated_read.json() == unauthenticated.json()
+
+    claim = request(
+        app,
+        "POST",
+        "/api/v1/pairing/claim",
+        json_body={
+            "client_id": "android",
+            "client_version": "0.2.0",
+            "pairing_code": "phase4-code",
+        },
+    )
+    assert claim.status_code == 200
+    token = claim.json()["access_token"]
+    authenticated = request(
+        app,
+        "PUT",
+        "/api/v1/profiles/default?expected_revision=1",
+        json_body=updated_profile_payload(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-StreamDeck-Client-Id": "android",
+        },
+    )
+
+    assert authenticated.status_code == 200
+    assert authenticated.json()["revision"] == 2
+    authenticated_read = request(
+        app,
+        "GET",
+        "/api/v1/profiles/default/snapshot",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-StreamDeck-Client-Id": "android",
+        },
+    )
+    assert authenticated_read.status_code == 200
+
+
+def test_profile_audit_exposes_revision_metadata_without_snapshot_content(
+    tmp_path: Path,
+) -> None:
+    app = make_seeded_app(tmp_path)
+    update = request(
+        app,
+        "PUT",
+        "/api/v1/profiles/default?expected_revision=1",
+        json_body=updated_profile_payload(),
+    )
+    assert update.status_code == 200
+
+    response = request(app, "GET", "/api/v1/profiles/default/audit")
+
+    assert response.status_code == 200
+    assert response.json()["profile_id"] == "default"
+    entries = response.json()["entries"]
+    assert [entry["revision"] for entry in entries] == [1, 2]
+    assert [entry["reason"] for entry in entries] == ["created", "updated"]
+    assert all(set(entry) == {"revision", "reason", "created_at"} for entry in entries)
+    assert "snapshot_json" not in response.text
+    assert "Atalho atualizado" not in response.text
+
+
+def test_profile_audit_missing_profile_is_sanitized(tmp_path: Path) -> None:
+    response = request(
+        make_seeded_app(tmp_path),
+        "GET",
+        "/api/v1/profiles/missing/audit",
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "code": "PROFILE_NOT_FOUND",
+        "message": "Profile not found",
+        "retryable": False,
+    }

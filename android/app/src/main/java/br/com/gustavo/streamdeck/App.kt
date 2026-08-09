@@ -29,6 +29,7 @@ import br.com.gustavo.streamdeck.network.PairingClient
 import br.com.gustavo.streamdeck.network.PairingCredentials
 import br.com.gustavo.streamdeck.network.PairingException
 import br.com.gustavo.streamdeck.network.ProfileSnapshotParser
+import br.com.gustavo.streamdeck.network.ProfileSnapshotSerializer
 import br.com.gustavo.streamdeck.network.ProtocolMessages
 import br.com.gustavo.streamdeck.network.ServerEndpoint
 import br.com.gustavo.streamdeck.network.StreamDeckButton
@@ -36,6 +37,8 @@ import br.com.gustavo.streamdeck.network.StreamDeckProfileSnapshot
 import br.com.gustavo.streamdeck.network.StreamDeckSocketListener
 import br.com.gustavo.streamdeck.network.StreamDeckWebSocketClient
 import br.com.gustavo.streamdeck.ui.ButtonExecutionState
+import br.com.gustavo.streamdeck.ui.ProfileEditorDraft
+import br.com.gustavo.streamdeck.ui.ProfileEditorScreen
 import br.com.gustavo.streamdeck.ui.StreamDeckGrid
 import java.util.UUID
 import kotlinx.coroutines.launch
@@ -89,6 +92,10 @@ private fun PairingScreen() {
     var profileSnapshot by remember { mutableStateOf<StreamDeckProfileSnapshot?>(null) }
     var buttonStates by remember { mutableStateOf<Map<String, ButtonExecutionState>>(emptyMap()) }
     var pendingPresses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var editingProfile by remember { mutableStateOf(false) }
+    var editorDraft by remember { mutableStateOf<ProfileEditorDraft?>(null) }
+    var savingProfile by remember { mutableStateOf(false) }
+    var editorError by remember { mutableStateOf<String?>(null) }
     var socket by remember { mutableStateOf<WebSocket?>(null) }
 
     val socketForEffect = socket
@@ -114,6 +121,10 @@ private fun PairingScreen() {
             status = ConnectionStatus.CONNECTING
             statusMessage = null
             profileSnapshot = null
+            editingProfile = false
+            editorDraft = null
+            savingProfile = false
+            editorError = null
             buttonStates = emptyMap()
             pendingPresses = emptyMap()
             try {
@@ -169,7 +180,12 @@ private fun PairingScreen() {
                                 "profile_snapshot" -> {
                                     runCatching { ProfileSnapshotParser.parse(rawMessage) }
                                         .onSuccess { snapshot ->
-                                            profileSnapshot = snapshot
+                                            if (!savingProfile) {
+                                                profileSnapshot = snapshot
+                                                if (!editingProfile) {
+                                                    editorDraft = ProfileEditorDraft.from(snapshot)
+                                                }
+                                            }
                                         }
                                         .onFailure {
                                             status = ConnectionStatus.ERROR
@@ -275,6 +291,69 @@ private fun PairingScreen() {
         }
     }
 
+    fun startEditing() {
+        val snapshot = profileSnapshot ?: return
+        editorDraft = ProfileEditorDraft.from(snapshot)
+        editorError = null
+        editingProfile = true
+    }
+
+    fun cancelEditing() {
+        profileSnapshot?.let { snapshot ->
+            editorDraft = ProfileEditorDraft.from(snapshot)
+        }
+        editorError = null
+        editingProfile = false
+    }
+
+    fun saveProfile() {
+        val snapshot = profileSnapshot ?: return
+        val draft = editorDraft ?: return
+        val updated = runCatching { draft.applyTo(snapshot) }
+            .getOrElse { error ->
+                editorError = error.message ?: "Dados do perfil inválidos"
+                return
+            }
+        val nextRevision = snapshot.revision + 1
+        val wire = runCatching {
+            ProfileSnapshotSerializer.toWire(updated, revision = nextRevision)
+        }.getOrElse { error ->
+            editorError = error.message ?: "Não foi possível preparar o perfil"
+            return
+        }
+        savingProfile = true
+        editorError = null
+        profileSnapshot = updated.copy(revision = nextRevision)
+        scope.launch {
+            try {
+                val endpoint = ServerEndpoint.parse(serverAddress)
+                val token = accessToken
+                    ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
+                val authenticatedClientId = pairedClientId ?: clientId.trim()
+                val response = pairingClient.updateProfile(
+                    endpoint = endpoint,
+                    clientId = authenticatedClientId,
+                    accessToken = token,
+                    profileId = snapshot.profileId,
+                    expectedRevision = snapshot.revision,
+                    profileWire = wire,
+                )
+                val confirmed = ProfileSnapshotParser.parseWireProfile(response)
+                profileSnapshot = confirmed
+                editorDraft = ProfileEditorDraft.from(confirmed)
+                savingProfile = false
+                editingProfile = false
+                editorError = null
+                statusMessage = "Perfil salvo na revisão ${confirmed.revision}"
+            } catch (error: Exception) {
+                profileSnapshot = snapshot
+                savingProfile = false
+                editorError = error.message ?: "Não foi possível salvar o perfil"
+                statusMessage = "Falha ao salvar o perfil; revise e tente novamente"
+            }
+        }
+    }
+
     fun clearPairing() {
         socket?.cancel()
         socket = null
@@ -285,11 +364,16 @@ private fun PairingScreen() {
         status = ConnectionStatus.DISCONNECTED
         statusMessage = "Pareamento removido"
         profileSnapshot = null
+        editingProfile = false
+        editorDraft = null
+        savingProfile = false
+        editorError = null
         buttonStates = emptyMap()
         pendingPresses = emptyMap()
     }
 
     val snapshot = profileSnapshot
+    val draft = editorDraft
     if (snapshot == null) {
         PairingForm(
             serverAddress = serverAddress,
@@ -323,6 +407,16 @@ private fun PairingScreen() {
             statusMessage = statusMessage,
             revision = null,
         )
+    } else if (editingProfile && draft != null) {
+        ProfileEditorScreen(
+            snapshot = snapshot,
+            draft = draft,
+            saving = savingProfile,
+            errorMessage = editorError,
+            onDraftChange = { editorDraft = it },
+            onSave = ::saveProfile,
+            onCancel = ::cancelEditing,
+        )
     } else {
         ConnectedDeckScreen(
             snapshot = snapshot,
@@ -330,6 +424,7 @@ private fun PairingScreen() {
             statusMessage = statusMessage,
             buttonStates = buttonStates,
             onButtonPress = ::pressButton,
+            onEditProfile = ::startEditing,
             onClearPairing = ::clearPairing,
         )
     }
@@ -408,6 +503,7 @@ private fun ConnectedDeckScreen(
     statusMessage: String?,
     buttonStates: Map<String, ButtonExecutionState>,
     onButtonPress: (StreamDeckButton) -> Unit,
+    onEditProfile: () -> Unit,
     onClearPairing: () -> Unit,
 ) {
     Column(
@@ -434,6 +530,12 @@ private fun ConnectedDeckScreen(
                 .fillMaxWidth()
                 .weight(1f),
         )
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onEditProfile,
+        ) {
+            Text("Editar perfil")
+        }
         OutlinedButton(
             modifier = Modifier.fillMaxWidth(),
             onClick = onClearPairing,

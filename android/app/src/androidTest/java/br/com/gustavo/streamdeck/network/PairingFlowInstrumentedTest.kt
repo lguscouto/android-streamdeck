@@ -39,6 +39,7 @@ class PairingFlowInstrumentedTest {
             device.findObject(By.text("Parear e conectar")).click()
             assertAuthenticatedProfile()
             assertActionFeedback()
+            assertEditorSave()
         }
 
         val credentials = store.load()
@@ -54,7 +55,10 @@ class PairingFlowInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             assertTrue(device.wait(Until.hasObject(By.text("Parear e conectar")), TIMEOUT_MS))
             device.findObject(By.text("Parear e conectar")).click()
-            assertAuthenticatedProfile()
+            assertAuthenticatedProfile(
+                revision = 2,
+                shortcutTitle = "Atalho fase 4",
+            )
         }
     }
 
@@ -62,9 +66,21 @@ class PairingFlowInstrumentedTest {
         device.findObject(By.text("Atalho Ctrl+Shift+S")).click()
         assertTrue(device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS))
         device.findObject(By.text("Reproduzir/pausar")).click()
-        assertTrue(device.wait(Until.hasObject(By.text("Erro")), TIMEOUT_MS))
+        assertTrue(device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS))
     }
 
+    private fun assertEditorSave() {
+        device.findObject(By.text("Editar perfil")).click()
+        assertTextVisible("Revisão atual: 1")
+        val fields = device.findObjects(By.clazz("android.widget.EditText"))
+        assertTrue("editor did not expose editable fields", fields.size >= 9)
+        fields[2].clear()
+        fields[2].setText("Atalho fase 4")
+        device.findObject(By.text("Salvar perfil")).click()
+        assertTextVisible("Perfil salvo na revisão 2")
+        assertTextVisible("Atalho fase 4")
+        assertTextVisible("Perfil sincronizado na revisão 2")
+    }
     private fun waitForFields(): List<androidx.test.uiautomator.UiObject2> {
         assertTrue(device.wait(Until.hasObject(By.clazz("android.widget.EditText")), TIMEOUT_MS))
         repeat(20) {
@@ -77,26 +93,34 @@ class PairingFlowInstrumentedTest {
         error("pairing form did not expose three text fields")
     }
 
-    private fun assertAuthenticatedProfile() {
+    private fun assertAuthenticatedProfile(
+        revision: Int = 1,
+        shortcutTitle: String = "Atalho Ctrl+Shift+S",
+    ) {
         assertTextVisible("Conectado")
         assertTextVisible("Servidor autenticado")
-        assertTextVisible("Perfil sincronizado na revisão 1")
+        assertTextVisible("Perfil sincronizado na revisão $revision")
         assertTextVisible("Página: Principal")
-        assertTextVisible("Atalho Ctrl+Shift+S")
+        assertTextVisible(shortcutTitle)
         assertTextVisible("Reproduzir/pausar")
         assertTextVisible("Documentação")
     }
 
     private fun assertTextVisible(expectedText: String) {
-        assertTrue(
-            "Expected '$expectedText'. Visible text: ${visibleNonSensitiveText()}",
-            device.wait(Until.hasObject(By.text(expectedText)), TIMEOUT_MS),
-        )
+        val found = device.wait(Until.hasObject(By.text(expectedText)), TIMEOUT_MS)
+        if (!found) {
+            throw AssertionError(
+                "Expected '$expectedText'. Visible text: ${visibleNonSensitiveText()}",
+            )
+        }
     }
 
     private fun visibleNonSensitiveText(): String = device
         .findObjects(By.clazz("android.widget.TextView"))
-        .mapNotNull { textView -> textView.text?.toString()?.takeIf { it.isNotBlank() } }
+        .mapNotNull { textView ->
+            runCatching { textView.text?.toString()?.takeIf { it.isNotBlank() } }
+                .getOrNull()
+        }
         .joinToString(separator = " | ")
 
     private companion object {

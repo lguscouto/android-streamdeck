@@ -1,11 +1,99 @@
 package br.com.gustavo.streamdeck.network
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class ProfileSnapshotTest {
+    @Test
+    fun `preserves typed action and serializes a complete revision`() {
+        val snapshot = ProfileSnapshotParser.parse(
+            """
+            {
+              "protocol_version": 1,
+              "type": "profile_snapshot",
+              "payload": {
+                "profile": {
+                  "protocol_version": 1,
+                  "id": "default",
+                  "name": "Perfil padrão",
+                  "revision": 1,
+                  "active_page_id": "main",
+                  "pages": [{
+                    "id": "main",
+                    "title": "Principal",
+                    "order": 0,
+                    "rows": 1,
+                    "columns": 1,
+                    "buttons": [{
+                      "id": "save",
+                      "row": 0,
+                      "column": 0,
+                      "title": "Salvar",
+                      "action": {
+                        "type": "hotkey",
+                        "modifiers": ["ctrl", "shift"],
+                        "key": "S"
+                      }
+                    }]
+                  }]
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            StreamDeckHotkeyAction(listOf("ctrl", "shift"), "S"),
+            snapshot.activePage.buttons.single().action,
+        )
+
+        val wire = ProfileSnapshotSerializer.toWire(snapshot, revision = 2)
+        val profile = JSONObject(wire)
+        assertEquals(2, profile.getInt("revision"))
+        assertEquals("hotkey", profile.getJSONArray("pages")
+            .getJSONObject(0)
+            .getJSONArray("buttons")
+            .getJSONObject(0)
+            .getJSONObject("action")
+            .getString("type"))
+        assertEquals(
+            2,
+            ProfileSnapshotParser.parseWireProfile(wire).revision,
+        )
+    }
+
+    @Test
+    fun `rejects unknown action types instead of silently dropping them`() {
+        val malformedSnapshot = """
+            {
+              "protocol_version": 1,
+              "type": "profile_snapshot",
+              "payload": {"profile": {
+                "protocol_version": 1,
+                "id": "default",
+                "name": "Perfil",
+                "revision": 1,
+                "active_page_id": "main",
+                "pages": [{
+                  "id": "main", "title": "Principal", "order": 0,
+                  "rows": 1, "columns": 1,
+                  "buttons": [{
+                    "id": "bad", "row": 0, "column": 0, "title": "Inválido",
+                    "action": {"type": "shell", "command": "whoami"}
+                  }]
+                }]
+              }}
+            }
+        """.trimIndent()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileSnapshotParser.parse(malformedSnapshot)
+        }
+    }
+
     @Test
     fun `parses configured grid and preserves button presentation data`() {
         val snapshot = ProfileSnapshotParser.parse(

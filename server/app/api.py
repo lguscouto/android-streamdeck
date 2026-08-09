@@ -102,15 +102,48 @@ def _safe_call(function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         raise _internal_error() from exc
 
 
+def _require_http_auth(
+    request: Request,
+    pairing_service: PairingService | None,
+    *,
+    required: bool,
+) -> None:
+    if not required:
+        return
+    if pairing_service is None:
+        raise APIError(503, "AUTH_UNAVAILABLE", "Authentication unavailable", True)
+
+    authorization = request.headers.get("authorization", "")
+    scheme, separator, token = authorization.partition(" ")
+    client_id = request.headers.get("x-streamdeck-client-id", "")
+    if (
+        scheme.lower() != "bearer"
+        or not separator
+        or not token
+        or token != token.strip()
+        or any(character.isspace() for character in token)
+        or not client_id
+    ):
+        raise APIError(401, "AUTH_REQUIRED", "Authentication required", False)
+    try:
+        authenticated = pairing_service.authenticate(client_id, token)
+    except Exception as exc:
+        raise _internal_error() from exc
+    if not authenticated:
+        raise APIError(401, "AUTH_REQUIRED", "Authentication required", False)
+
+
 def create_router(
     repository: ProfileRepository,
     websocket_manager: Any = None,
     pairing_service: PairingService | None = None,
+    require_auth: bool = False,
 ) -> APIRouter:
     router = APIRouter(prefix=API_PREFIX, tags=["profiles"])
 
     @router.get("/profile")
-    def get_active_profile() -> JSONResponse:
+    def get_active_profile(request: Request) -> JSONResponse:
+        _require_http_auth(request, pairing_service, required=require_auth)
         profile = _safe_call(repository.get_active_profile)
         if profile is None:
             raise APIError(404, "PROFILE_NOT_FOUND", "Profile not found", False)
@@ -118,15 +151,27 @@ def create_router(
 
     @router.get("/profiles/{profile_id}/snapshot")
     def get_profile_snapshot(
+        request: Request,
         profile_id: StableId,
         revision: int | None = Query(default=None, ge=1),
     ) -> JSONResponse:
+        _require_http_auth(request, pairing_service, required=require_auth)
         profile = _safe_call(repository.get_profile, profile_id, revision)
         return JSONResponse(content=profile.to_wire())
 
     @router.get("/actions")
     def get_action_catalog() -> JSONResponse:
         return JSONResponse(content=ACTION_CATALOG)
+
+    @router.get("/profiles/{profile_id}/audit")
+    def get_profile_audit(
+        request: Request,
+        profile_id: StableId,
+        limit: int = Query(default=50, ge=1, le=100),
+    ) -> JSONResponse:
+        _require_http_auth(request, pairing_service, required=require_auth)
+        entries = _safe_call(repository.list_audit, profile_id, limit=limit)
+        return JSONResponse(content={"profile_id": profile_id, "entries": entries})
 
     @router.post("/pairing/claim")
     async def claim_pairing(payload: PairingClaimRequest) -> JSONResponse:
@@ -168,10 +213,12 @@ def create_router(
 
     @router.put("/profiles/{profile_id}")
     async def put_profile(
+        request: Request,
         profile_id: StableId,
         profile: Profile,
         expected_revision: int = Query(..., ge=1),
     ) -> JSONResponse:
+        _require_http_auth(request, pairing_service, required=require_auth)
         if profile.id != profile_id:
             raise APIError(
                 422,
