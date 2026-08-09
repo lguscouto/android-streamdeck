@@ -12,6 +12,7 @@ from app.config import Settings
 from app.db import Database
 from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
 from app.schemas import Profile
+from app.websocket import WebSocketManager, create_websocket_router
 
 SERVICE_NAME = "android-streamdeck-server"
 PROTOCOL_VERSION = "0.1"
@@ -51,13 +52,17 @@ def create_app(
     else:
         database = getattr(repository, "database", None)
 
+    active_websocket_manager = websocket_manager or WebSocketManager(repository)
     application = FastAPI(title=SERVICE_NAME, version=PROTOCOL_VERSION)
     application.state.settings = runtime_settings
     application.state.database = database
     application.state.profile_repository = repository
-    application.state.websocket_manager = websocket_manager
+    application.state.websocket_manager = active_websocket_manager
     register_exception_handlers(application)
-    application.include_router(create_router(repository, websocket_manager))
+    application.include_router(create_router(repository, active_websocket_manager))
+    application.include_router(
+        create_websocket_router(repository, active_websocket_manager)
+    )
 
     @application.get("/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:

@@ -67,6 +67,24 @@ conflict, and internal failures use the sanitized shape:
 {"code":"PROFILE_REVISION_CONFLICT","message":"Profile revision conflict","retryable":true}
 ```
 
+## WebSocket de sincronização
+
+O canal da Fase 1 fica em `ws://127.0.0.1:8765/api/v1/ws` e usa os envelopes
+do schema compartilhado v1:
+
+1. o cliente envia `hello` com `client_id`, versão e `[1]` em
+   `supported_protocol_versions`;
+2. o servidor responde `welcome` e `profile_snapshot`;
+3. `ping` recebe `pong` com o mesmo `nonce`;
+4. `press` valida perfil, revisão, página e botão e responde `ack` ou `error`;
+5. alterações persistidas por HTTP geram `profile_changed` para as sessões
+   conectadas.
+
+Nesta fase o `ack` de um botão válido tem status `rejected`, pois os
+adaptadores de execução de ações ainda pertencem às fases seguintes. O canal
+encerra handshakes sem `hello` e sessões ociosas com erros estruturados e não
+aceita envelopes `shell`, `command` ou campos extras.
+
 ## Development checks
 
 ```bash
