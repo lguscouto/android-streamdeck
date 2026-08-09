@@ -3,9 +3,17 @@ import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from app.schemas import MessageAdapter, Profile
+from app.schemas import (
+    AckPayload,
+    Button,
+    ErrorPayload,
+    HelloPayload,
+    MessageAdapter,
+    Profile,
+    ProfileChangedPayload,
+)
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[2] / "shared" / "fixtures" / "default-profile.json"
@@ -138,6 +146,101 @@ def test_url_action_requires_https(url: str) -> None:
 
     with pytest.raises(ValidationError, match="https"):
         Profile.model_validate(profile)
+
+
+@pytest.mark.parametrize("url", ["https://example.com:bad", "https://example.com:99999"])
+def test_url_action_rejects_invalid_https_ports(url: str) -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {"type": "url", "url": url}
+
+    with pytest.raises(ValidationError):
+        Profile.model_validate(profile)
+
+
+@pytest.mark.parametrize("url", ["https://example.com:1", "https://example.com:65535"])
+def test_url_action_accepts_valid_https_port_boundaries(url: str) -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {"type": "url", "url": url}
+
+    Profile.model_validate(profile)
+
+
+def test_duplicate_hotkey_modifiers_are_rejected() -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {
+        "type": "hotkey",
+        "modifiers": ["ctrl", "ctrl"],
+        "key": "A",
+    }
+
+    with pytest.raises(ValidationError, match="unique"):
+        Profile.model_validate(profile)
+
+
+@pytest.mark.parametrize(
+    ("model", "data", "field"),
+    [
+        (
+            Button,
+            {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "key", "key": "A"},
+            },
+            "icon",
+        ),
+        (
+            Button,
+            {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "key", "key": "A"},
+            },
+            "color",
+        ),
+        (
+            HelloPayload,
+            {
+                "client_id": "android",
+                "client_version": "1.0.0",
+                "supported_protocol_versions": [1],
+            },
+            "requested_profile_id",
+        ),
+        (
+            AckPayload,
+            {"request_id": "req-1", "status": "accepted"},
+            "message",
+        ),
+        (
+            ErrorPayload,
+            {"code": "INVALID_REQUEST", "message": "Invalid request"},
+            "request_id",
+        ),
+        (
+            ErrorPayload,
+            {"code": "INVALID_REQUEST", "message": "Invalid request"},
+            "retryable",
+        ),
+        (
+            ProfileChangedPayload,
+            {"profile_id": "default", "revision": 2},
+            "reason",
+        ),
+    ],
+)
+def test_explicit_null_is_rejected_for_non_nullable_optional_fields(
+    model: type[BaseModel], data: dict[str, object], field: str
+) -> None:
+    data = copy.deepcopy(data)
+    data[field] = None
+
+    with pytest.raises(ValidationError):
+        model.model_validate(data)
 
 
 def test_all_message_variants_are_accepted() -> None:

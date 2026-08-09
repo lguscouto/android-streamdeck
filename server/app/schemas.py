@@ -94,10 +94,13 @@ class UrlAction(StrictModel):
             raise ValueError("url must not contain whitespace")
         try:
             parsed = urlsplit(url)
+            port = parsed.port
         except ValueError as exc:
             raise ValueError("url must be a valid HTTPS URL") from exc
         if parsed.scheme != "https" or not parsed.netloc or parsed.hostname is None:
             raise ValueError("url must be a valid HTTPS URL")
+        if port is not None and not 1 <= port <= 65535:
+            raise ValueError("url port must be between 1 and 65535")
         return url
 
 
@@ -122,11 +125,13 @@ class Button(StrictModel):
     row: NonNegativeInt
     column: NonNegativeInt
     title: Title
-    icon: Annotated[str, Field(min_length=1, max_length=120)] | None = None
+    icon: Annotated[str, Field(min_length=1, max_length=120)] = Field(
+        default_factory=lambda: None
+    )
     color: Annotated[
         str,
         Field(pattern=r"^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"),
-    ] | None = None
+    ] = Field(default_factory=lambda: None)
     action: Action
 
 
@@ -199,7 +204,7 @@ class HelloPayload(StrictModel):
     client_id: StableId
     client_version: VersionString
     supported_protocol_versions: list[Literal[1]] = Field(min_length=1)
-    requested_profile_id: StableId | None = None
+    requested_profile_id: StableId = Field(default_factory=lambda: None)
 
     @field_validator("supported_protocol_versions")
     @classmethod
@@ -229,11 +234,13 @@ class PressPayload(StrictModel):
 class AckPayload(StrictModel):
     request_id: RequestId
     status: Literal["accepted", "completed", "rejected"]
-    message: Annotated[str, Field(min_length=1, max_length=500)] | None = None
+    message: Annotated[str, Field(min_length=1, max_length=500)] = Field(
+        default_factory=lambda: None
+    )
 
 
 class ErrorPayload(StrictModel):
-    request_id: RequestId | None = None
+    request_id: RequestId = Field(default_factory=lambda: None)
     code: Annotated[
         str,
         Field(
@@ -243,7 +250,7 @@ class ErrorPayload(StrictModel):
         ),
     ]
     message: Annotated[str, Field(min_length=1, max_length=500)]
-    retryable: bool | None = None
+    retryable: bool = Field(default_factory=lambda: None)
 
 
 class NoncePayload(StrictModel):
@@ -257,7 +264,9 @@ class ProfileSnapshotPayload(StrictModel):
 class ProfileChangedPayload(StrictModel):
     profile_id: StableId
     revision: PositiveInt
-    reason: Literal["created", "updated", "deleted"] | None = None
+    reason: Literal["created", "updated", "deleted"] = Field(
+        default_factory=lambda: None
+    )
 
 
 class HelloMessage(StrictModel):
