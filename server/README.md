@@ -85,6 +85,16 @@ adaptadores de execução de ações ainda pertencem às fases seguintes. O cana
 encerra handshakes sem `hello` e sessões ociosas com erros estruturados e não
 aceita envelopes `shell`, `command` ou campos extras.
 
+Limites e semântica de transporte da Fase 1:
+
+- no máximo `32` conexões WebSocket simultâneas;
+- frames textuais acima de `256 KiB` são rejeitados;
+- cada envio de broadcast tem timeout de `1 s`; conexões lentas ou quebradas
+  são removidas sem bloquear as demais;
+- broadcasts são serializados por perfil e revisões antigas não são reenviadas;
+- conflitos de revisão são `retryable` e não ficam cacheados por
+  `request_id`, permitindo repetir a solicitação após sincronizar a revisão.
+
 ## Development checks
 
 ```bash
