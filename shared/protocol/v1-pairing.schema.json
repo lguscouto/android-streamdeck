@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://android-streamdeck.local/schemas/v1-pairing.schema.json",
+  "title": "Contrato HTTP de pareamento Android Stream Deck v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/claimRequest"
+    },
+    {
+      "$ref": "#/$defs/claimResponse"
+    }
+  ],
+  "$defs": {
+    "stableId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+    },
+    "versionString": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "pairingCode": {
+      "type": "string",
+      "minLength": 6,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$"
+    },
+    "accessToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z0-9._~-]+$"
+    },
+    "claimRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_id",
+        "client_version",
+        "pairing_code"
+      ],
+      "properties": {
+        "client_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "client_version": {
+          "$ref": "#/$defs/versionString"
+        },
+        "pairing_code": {
+          "$ref": "#/$defs/pairingCode"
+        }
+      }
+    },
+    "claimResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "client_id",
+        "access_token"
+      ],
+      "properties": {
+        "client_id": {
+          "$ref": "#/$defs/stableId"
+        },
+        "access_token": {
+          "$ref": "#/$defs/accessToken"
+        }
+      }
+    }
+  }
+}

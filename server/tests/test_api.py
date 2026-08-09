@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -78,15 +79,20 @@ def test_health_regression_is_exactly_sanitized(tmp_path: Path) -> None:
 def test_settings_include_database_path_from_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    pairing_code = f"test-{secrets.token_urlsafe(24)}"
     monkeypatch.setenv("STREAMDECK_HOST", "192.0.2.10")
     monkeypatch.setenv("STREAMDECK_PORT", "9000")
     monkeypatch.setenv("STREAMDECK_DATABASE_PATH", "custom/streamdeck.sqlite3")
+    monkeypatch.setenv("STREAMDECK_PAIRING_CODE", pairing_code)
+    monkeypatch.setenv("STREAMDECK_REQUIRE_AUTH", "true")
 
     settings = Settings.from_env()
 
     assert settings.host == "192.0.2.10"
     assert settings.port == 9000
     assert settings.database_path == "custom/streamdeck.sqlite3"
+    assert settings.pairing_code == pairing_code
+    assert settings.require_auth is True
 
 
 def test_active_profile_returns_wire_json_without_unset_optionals(

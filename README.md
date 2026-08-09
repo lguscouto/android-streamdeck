@@ -17,7 +17,9 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 
 ## Estado atual
 
-A **Fase 1 do servidor** está implementada localmente:
+As **Fases 1 e 2** estão implementadas localmente.
+
+### Fase 1 — servidor e contratos
 
 - SQLite versionado com migração, FKs e histórico de revisões;
 - seed idempotente do perfil padrão e recuperação segura após reinício;
@@ -28,16 +30,30 @@ A **Fase 1 do servidor** está implementada localmente:
 - envelopes fechados, sem shell/command arbitrário;
 - respostas de erro sanitizadas, sem SQL, caminhos, segredos ou tracebacks.
 
+### Fase 2 — pareamento e transporte autenticado
+
+- endpoint HTTP de pareamento com código manual mantido fora do Git;
+- token opaco aleatório, persistido no SQLite do servidor apenas como hash;
+- autenticação obrigatória do WebSocket para bind remoto;
+- cliente Android com OkHttp para pareamento, WebSocket autenticado e
+  sincronização de snapshot do perfil;
+- token Android criptografado com AES-GCM, com chave não exportável no Android
+  Keystore, e vinculado ao endpoint que o emitiu;
+- cleartext HTTP/WS permitido apenas no manifesto `debug`; o manifesto principal
+  mantém `usesCleartextTraffic=false`.
+
 Acesso local padrão:
 
 - Health: `http://127.0.0.1:8765/health`
 - API: `http://127.0.0.1:8765/api/v1`
 - WebSocket: `ws://127.0.0.1:8765/api/v1/ws`
 
-O bind padrão é loopback. Pareamento, autenticação, cliente Android conectado,
-adaptadores de execução de ações e exposição segura na LAN permanecem nas fases
-seguintes. Nesta fase, um `press` válido é reconhecido, mas retorna `rejected`
-porque a execução ainda não foi habilitada.
+O bind padrão é loopback. O pareamento e a autenticação do WebSocket estão
+implementados, inclusive no cliente Android. O token Android é criptografado com
+AES-GCM por chave não exportável no Android Keystore e permanece vinculado ao
+endpoint que o emitiu. Adaptadores de execução de ações e a exposição operacional
+segura na LAN permanecem para as fases seguintes. Nesta fase, um `press` válido é
+reconhecido, mas retorna `rejected` porque a execução ainda não foi habilitada.
 
 Validação atual do servidor:
 
@@ -74,7 +90,6 @@ padrão é `server/data/streamdeck.sqlite3`, ignorado pelo Git. Consulte
 
 ## Próximas fases
 
-- Fase 2: pareamento, autenticação do WebSocket e cliente Android de rede;
 - Fase 3: grade funcional e primeira ação end-to-end;
-- fases seguintes: editor, perfis, descoberta, empacotamento, hardening e
-  release verificável.
+- fases seguintes: editor, perfis, descoberta, TLS/mTLS, empacotamento e release
+  verificável.

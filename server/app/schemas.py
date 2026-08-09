@@ -33,6 +33,14 @@ RequestId: TypeAlias = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
     ),
 ]
+AccessToken: TypeAlias = Annotated[
+    str,
+    Field(
+        min_length=32,
+        max_length=512,
+        pattern=r"^[A-Za-z0-9._~-]+$",
+    ),
+]
 
 NonNegativeInt: TypeAlias = Annotated[int, Field(ge=0)]
 PositiveInt: TypeAlias = Annotated[int, Field(ge=1)]
@@ -275,6 +283,7 @@ class HelloPayload(StrictModel):
         min_length=1,
         json_schema_extra={"uniqueItems": True},
     )
+    access_token: AccessToken = Field(default_factory=lambda: None)
     requested_profile_id: StableId = Field(default_factory=lambda: None)
 
     @field_validator("supported_protocol_versions")

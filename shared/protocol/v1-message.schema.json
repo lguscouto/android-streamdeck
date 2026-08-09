@@ -73,6 +73,12 @@
       "maxLength": 128,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
     },
+    "accessToken": {
+      "type": "string",
+      "minLength": 32,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z0-9._~-]+$"
+    },
     "versionString": {
       "type": "string",
       "minLength": 1,
@@ -280,6 +286,9 @@
           "items": {
             "const": 1
           }
+        },
+        "access_token": {
+          "$ref": "#/$defs/accessToken"
         },
         "requested_profile_id": {
           "$ref": "#/$defs/stableId"

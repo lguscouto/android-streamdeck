@@ -26,7 +26,7 @@ Esta matriz separa o inventário verificado no host das escolhas provisórias pa
 | SDK e build Android | Plataformas `android-34`, `android-35`, `android-36.1`; build-tools `34.0.0`, `35.0.0`, `36.1.0`, `37.0.0` | `compileSdk 35`, `targetSdk 35`, build-tools `35.0.0` | Seleção provisória; não é validação de instalação no A10 |
 | Dependências da toolchain | Cache local com AGP `8.2.1`, `8.7.2`, `8.8.2`; Gradle `8.10.2`, `8.13`, `9.4.1`; Kotlin Gradle plugin `2.0.21`; Compose UI `1.8.3`; Material3 `1.3.2`; Activity Compose `1.10.0` | Kotlin `2.0.21`, AGP `8.8.2`, Gradle `8.10.2` | Versões disponíveis no cache; a combinação ainda deve ser exercitada no build do projeto |
 | A10 | Nenhum dispositivo/emulador conectado; `ro.build.version.sdk`, modelo, tamanho e densidade não medidos | `minSdk 26` somente para manter o esqueleto compilável | Deve ser confirmado/ajustado após obter a API real do A10, antes do release |
-| Servidor | Python `3.14.6` e uv `0.11.21` encontrados | Python `3.14.6` com uv `0.11.21`, FastAPI/WebSocket, `127.0.0.1:8765` no desenvolvimento | `127.0.0.1` permanece até o teste de rede LAN |
+| Servidor | Python `3.14.6` e uv `0.11.21` encontrados | Python `3.14.6` com uv `0.11.21`, FastAPI/WebSocket, `127.0.0.1:8765` no desenvolvimento | Bind remoto exige código de pareamento e autenticação |
 | Grade do painel | Dimensões e densidade do A10 ainda não medidas | Grade inicial configurável de 3 colunas x 5 linhas | Default provisório; revisar quando houver medidas reais do aparelho |
 
 ### Como revisar a decisão quando o A10 for conectado
@@ -52,15 +52,22 @@ Esta matriz separa o inventário verificado no host das escolhas provisórias pa
 - **Contratos:** mensagens WebSocket e endpoints auxiliares devem usar esquemas explícitos, validar tipos, limites e identificadores, e retornar erros estruturados.
 - **Execução:** cada ação é um adaptador registrado no servidor, com código próprio e parâmetros permitidos. O servidor devolve confirmação de recebimento e atualizações de progresso/resultado quando aplicável.
 
-## Rede local
+## Rede local e autenticação
 
-O servidor escuta em um endereço configurável da máquina Windows e o Android conecta-se ao IP/porta informados na mesma rede local. O MVP não pressupõe exposição à internet, encaminhamento de portas ou dependência de serviço em nuvem. A implementação deve tratar desconexão, reconexão controlada, timeout e servidor indisponível como estados normais.
+O servidor usa `127.0.0.1` por padrão. Para permitir conexão do Android em outra
+interface, é obrigatório configurar `STREAMDECK_PAIRING_CODE`; a configuração
+ativa autenticação do WebSocket automaticamente. O endpoint HTTP de pareamento
+recebe o código fora do repositório e emite um token opaco aleatório. O banco
+persiste somente o hash SHA-256 desse token e substitui o token anterior quando
+o mesmo `client_id` é pareado novamente.
 
-Mesmo em rede local, a superfície deve ser limitada. Na Fase 1 o servidor
-permanece em `127.0.0.1`: o WebSocket ainda não possui pareamento ou
-autenticação e o cliente Android ainda não está conectado. O bind em outra
-interface só deve ser considerado depois da implementação desses controles na
-Fase 2. Nenhuma credencial deve ser armazenada no repositório.
+O Android envia o token somente no payload do `hello`, nunca na URL. Sessões sem
+token ou com token inválido são fechadas antes da leitura do perfil. O aplicativo
+mantém o token criptografado com AES-GCM por chave do Android Keystore e só o usa
+para o endpoint normalizado que emitiu o pareamento. O MVP usa HTTP/WS em rede
+local confiável e não deve ser exposto à internet; TLS/mTLS, rotação administrativa
+e descoberta segura são hardening posterior. Nenhuma credencial deve ser
+armazenada no repositório.
 
 ## Limite de segurança: sem shell command arbitrário
 

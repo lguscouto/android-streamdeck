@@ -1,11 +1,15 @@
+import secrets
+
 import uvicorn
 
 from app.runner import main
 
 
 def test_main_passes_environment_bind_settings_to_uvicorn(monkeypatch):
+    pairing_code = f"test-{secrets.token_urlsafe(24)}"
     monkeypatch.setenv("STREAMDECK_HOST", "0.0.0.0")
     monkeypatch.setenv("STREAMDECK_PORT", "18766")
+    monkeypatch.setenv("STREAMDECK_PAIRING_CODE", pairing_code)
     calls = []
 
     def fake_run(application, **kwargs):

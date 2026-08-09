@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import sqlite3
 
-LATEST_SCHEMA_VERSION = 1
+LATEST_SCHEMA_VERSION = 2
 _REQUIRED_TABLES = frozenset(
-    {"profiles", "pages", "buttons", "actions", "profile_revisions"}
+    {
+        "profiles",
+        "pages",
+        "buttons",
+        "actions",
+        "profile_revisions",
+        "paired_clients",
+    }
 )
+_REQUIRED_TABLES_V1 = _REQUIRED_TABLES - {"paired_clients"}
 
 
 class MigrationError(RuntimeError):
@@ -94,18 +102,36 @@ _SCHEMA_V1 = (
 )
 
 
+_SCHEMA_V2 = (
+    """
+    CREATE TABLE IF NOT EXISTS paired_clients (
+        client_id TEXT PRIMARY KEY,
+        client_version TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        paired_at TEXT NOT NULL,
+        last_seen_at TEXT
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS ix_paired_clients_token_hash "
+    "ON paired_clients(token_hash)",
+)
+
+
 def _foreign_keys_enabled(connection: sqlite3.Connection) -> bool:
     return connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
 
 
-def _schema_is_complete(connection: sqlite3.Connection) -> bool:
+def _schema_is_complete(
+    connection: sqlite3.Connection,
+    required_tables: frozenset[str] = _REQUIRED_TABLES,
+) -> bool:
     tables = {
         row[0]
         for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         )
     }
-    return _REQUIRED_TABLES.issubset(tables)
+    return required_tables.issubset(tables)
 
 
 def migrate(connection: sqlite3.Connection) -> None:
@@ -121,6 +147,10 @@ def migrate(connection: sqlite3.Connection) -> None:
     current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
     if current_version > LATEST_SCHEMA_VERSION:
         raise MigrationError("database schema version is newer than this server")
+    if current_version >= 1 and not _schema_is_complete(
+        connection, _REQUIRED_TABLES_V1
+    ):
+        raise MigrationError("database schema is incomplete")
     if current_version == LATEST_SCHEMA_VERSION:
         if not _schema_is_complete(connection):
             raise MigrationError("database schema is incomplete")
@@ -132,6 +162,10 @@ def migrate(connection: sqlite3.Connection) -> None:
             for statement in _SCHEMA_V1:
                 connection.execute(statement)
             connection.execute("PRAGMA user_version = 1")
+        if current_version < 2:
+            for statement in _SCHEMA_V2:
+                connection.execute(statement)
+            connection.execute("PRAGMA user_version = 2")
         connection.commit()
     except sqlite3.Error as exc:
         connection.rollback()

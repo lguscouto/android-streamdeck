@@ -2,26 +2,47 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any, TypeAlias
 
 from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.pairing import (
+    PairingCodeInvalidError,
+    PairingService,
+    PairingUnavailableError,
+)
 from app.repositories.profiles import (
     ProfileConflictError,
     ProfileNotFoundError,
     ProfileRepository,
     ProfileRevisionNotFoundError,
 )
-from app.schemas import Profile, StableId
+from app.schemas import AccessToken, Profile, StableId, StrictModel, VersionString
 
 API_PREFIX = "/api/v1"
 ACTION_TYPES = ("hotkey", "key", "media", "text", "url", "application")
 ACTION_CATALOG = {"actions": [{"type": action_type} for action_type in ACTION_TYPES]}
 LOGGER = logging.getLogger(__name__)
+PairingCode: TypeAlias = Annotated[
+    str,
+    Field(min_length=6, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$"),
+]
+
+
+class PairingClaimRequest(StrictModel):
+    client_id: StableId
+    client_version: VersionString
+    pairing_code: PairingCode
+
+
+class PairingClaimResponse(StrictModel):
+    client_id: StableId
+    access_token: AccessToken
 
 
 class APIError(Exception):
@@ -84,6 +105,7 @@ def _safe_call(function: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
 def create_router(
     repository: ProfileRepository,
     websocket_manager: Any = None,
+    pairing_service: PairingService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=API_PREFIX, tags=["profiles"])
 
@@ -105,6 +127,44 @@ def create_router(
     @router.get("/actions")
     def get_action_catalog() -> JSONResponse:
         return JSONResponse(content=ACTION_CATALOG)
+
+    @router.post("/pairing/claim")
+    async def claim_pairing(payload: PairingClaimRequest) -> JSONResponse:
+        if pairing_service is None:
+            raise APIError(
+                503,
+                "PAIRING_UNAVAILABLE",
+                "Pairing is unavailable",
+                True,
+            )
+        try:
+            token = await run_in_threadpool(
+                pairing_service.claim_token,
+                payload.client_id,
+                payload.client_version,
+                payload.pairing_code,
+            )
+        except PairingCodeInvalidError:
+            raise APIError(
+                401,
+                "PAIRING_CODE_INVALID",
+                "Pairing code is invalid",
+                False,
+            ) from None
+        except PairingUnavailableError:
+            raise APIError(
+                503,
+                "PAIRING_UNAVAILABLE",
+                "Pairing is unavailable",
+                True,
+            ) from None
+        except Exception as exc:
+            raise _internal_error() from exc
+        response = PairingClaimResponse(
+            client_id=payload.client_id,
+            access_token=token,
+        )
+        return JSONResponse(content=response.to_wire())
 
     @router.put("/profiles/{profile_id}")
     async def put_profile(

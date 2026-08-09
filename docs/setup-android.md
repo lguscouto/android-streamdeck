@@ -2,9 +2,9 @@
 
 ## Escopo e estado da inspeção
 
-Este documento registra o diagnóstico real do host usado para o projeto, sem alterar a configuração do Android Studio, do SDK, do Python ou do PATH. Os resultados abaixo foram obtidos no Windows; os comandos de repetição usam os caminhos nativos do Windows e suas equivalências MSYS/Git Bash.
-
-Nenhum APK foi criado nesta etapa e o A10 ainda não foi validado. A inspeção do dispositivo ficou bloqueada porque não havia dispositivo Android nem emulador conectado no momento da execução.
+Este documento registra o diagnóstico real do host usado para o projeto. O
+baseline Android e o cliente autenticado da Fase 2 já foram compilados; o fluxo
+foi exercitado no emulador `Pixel_8`. O A10 físico ainda não foi validado.
 
 ## Ferramentas encontradas
 
@@ -48,16 +48,15 @@ Os artefatos abaixo foram encontrados no cache local; a presença no cache não 
 
 ## Estado do ADB e do dispositivo
 
-A execução de `adb devices -l` retornou somente o cabeçalho `List of devices attached`, sem dispositivos listados. O A10 não foi identificado e nenhum emulador estava conectado.
+O AVD `Pixel_8` está conectado como `emulator-5554` e respondeu com os
+valores reais abaixo:
 
-As tentativas de consulta abaixo retornaram `no devices/emulators found`:
+- modelo: `sdk_gphone16k_x86_64`;
+- API: `37`;
+- resolução: `1080x2400`;
+- densidade: `420`.
 
-- `ro.product.model` — modelo: **não medido**;
-- `ro.build.version.sdk` — API: **não medida**;
-- `wm size` — tamanho da tela: **não medido**;
-- `wm density` — densidade: **não medida**.
-
-Por privacidade, este documento não registra serial, IMEI ou qualquer outro identificador do aparelho.
+O A10 continua não identificado e não medido.
 
 ## Como revisar a decisão quando o A10 for conectado
 
@@ -66,7 +65,7 @@ Por privacidade, este documento não registra serial, IMEI ou qualquer outro ide
 3. Repetir `adb shell getprop ro.product.model`, `adb shell getprop ro.build.version.sdk`, `adb shell wm size` e `adb shell wm density`, registrando os valores reais neste documento e na matriz de `docs/architecture.md`.
 4. Comparar a API medida com o `minSdk 26` provisório e ajustar o `minSdk` conforme a política de suporte; não deduzir a API a partir do nome “A10”.
 5. Usar tamanho e densidade medidos para validar a grade inicial de 3 colunas x 5 linhas e ajustar o default configurável se necessário.
-6. Exercitar a combinação Kotlin `2.0.21`, AGP `8.8.2`, Gradle `8.10.2`, `compileSdk 35`, `targetSdk 35` e build-tools `35.0.0` em um build real. A conclusão deve registrar o resultado; este documento não afirma que um APK já foi criado.
+6. A combinação Kotlin `2.0.21`, AGP `8.8.2`, Gradle `8.10.2`, `compileSdk 35`, `targetSdk 35` e build-tools `35.0.0` foi exercitada em builds reais de debug e release. Isso não substitui a validação física de compatibilidade no A10.
 
 Até essa revisão, o `minSdk 26` é apenas uma escolha provisória para o esqueleto compilável e não uma afirmação de compatibilidade final com o A10.
 
@@ -183,11 +182,33 @@ SDK='/c/Users/gustavo/AppData/Local/Android/Sdk'
 "$SDK/emulator/emulator.exe" -avd Pixel_8 -no-snapshot-load
 ```
 
-Depois, aguardar `sys.boot_completed=1`, confirmar `adb devices` e repetir a validação no APK final. A automação da interface nativa Compose deverá usar ADB/UiAutomator; o fluxo CDP de WebView não se aplica a este app nativo.
+Depois, aguardar `sys.boot_completed=1`, confirmar `adb devices` e repetir a validação no APK final. A automação da interface nativa Compose usa ADB/UiAutomator; o fluxo CDP de WebView não se aplica a este app nativo.
+
+## Smoke funcional da Fase 2
+
+A validação final usou UiAutomator instrumentado no `Pixel_8`, e não injeção de
+teclas ADB, para preencher o campo Compose de forma confiável. Um servidor
+efêmero em `0.0.0.0:8765` recebeu um código aleatório apenas em memória; o código
+foi passado ao runner do teste, sem ser gravado no projeto nem em relatórios.
+
+O teste verificou o fluxo completo:
+
+1. pareamento HTTP;
+2. `hello` WebSocket autenticado;
+3. estados visíveis `Conectado`, `Servidor autenticado` e
+   `Perfil sincronizado na revisão 1`;
+4. três valores de preferências no envelope cifrado `v1:`, sem token em texto
+   claro;
+5. reinício da atividade e reconexão sem reenviar o código.
+
+O relatório do AVD registrou dois testes e zero falhas. O servidor, banco
+SQLite temporário e dados do aplicativo foram removidos ao fim do smoke; a porta
+`8765` não permaneceu em escuta. Consulte
+[`phase-2-delivery.md`](phase-2-delivery.md) para os comandos e artefatos finais.
 
 ## Recomendação provisória para o desenvolvimento
 
 - Usar explicitamente o JBR 21 do Android Studio em comandos e configurações locais. O caminho confirmado é `C:\Program Files\Android\Android Studio\jbr\bin\java.exe` (ou `/c/Program Files/Android/Android Studio/jbr/bin/java.exe` no MSYS).
 - Usar o ADB pelo caminho absoluto confirmado enquanto ele não for adicionado ao `PATH`: `C:\Users\gustavo\AppData\Local\Android\Sdk\platform-tools\adb.exe`.
-- Manter o servidor em `127.0.0.1:8765` durante o desenvolvimento local e só alterar o host para o teste de rede LAN, documentando o resultado.
+- Manter o servidor em `127.0.0.1:8765` durante o desenvolvimento local; para testar o Android em LAN/emulador, usar bind remoto somente com `STREAMDECK_PAIRING_CODE` e `STREAMDECK_REQUIRE_AUTH=auto`.
 - Não registrar modelo, API, tamanho ou densidade do A10 como se fossem conhecidos. Esses valores só podem ser preenchidos após uma consulta bem-sucedida ao dispositivo.

@@ -1,103 +1,136 @@
-# Android Stream Deck server
+# Servidor Android Stream Deck
 
-Minimal local FastAPI server for the Android Stream Deck protocol.
+Servidor FastAPI/WebSocket local para o Android Stream Deck.
 
-## Run the server
+## Executar no Windows
 
-From this directory, run:
+A partir deste diretório:
 
 ```bash
-uv run streamdeck-server
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync streamdeck-server
 ```
 
-The operational entrypoint reads the bind configuration and passes it to
-Uvicorn. The defaults are:
+Padrões:
 
 - host: `127.0.0.1`
-- port: `8765`
+- porta: `8765`
+- banco: `server/data/streamdeck.sqlite3`
+- pareamento: desabilitado no modo loopback sem código configurado
 
-The health endpoint is available at `http://127.0.0.1:8765/health` when the
-defaults are used.
+O endpoint de saúde padrão é `http://127.0.0.1:8765/health`.
 
-## Configure the bind address
+O arquivo `.env.example` é apenas documentação e não é carregado automaticamente.
+Não grave códigos de pareamento, tokens ou outras credenciais no repositório.
 
-Set the environment variables before starting the entrypoint:
+## Expor para o Android na rede local
 
-```bash
-export STREAMDECK_HOST=127.0.0.1
-export STREAMDECK_PORT=18766
-uv run streamdeck-server
-```
-
-Para uma única execução em shell POSIX:
+O bind remoto exige autenticação. Configure um código de pareamento fora do Git e
+inicie o servidor, por exemplo:
 
 ```bash
-STREAMDECK_HOST=127.0.0.1 STREAMDECK_PORT=18766 uv run streamdeck-server
+export STREAMDECK_HOST=0.0.0.0
+export STREAMDECK_PORT=8765
+export STREAMDECK_PAIRING_CODE='COLOQUE_SEU_CODIGO_AQUI'
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync streamdeck-server
 ```
 
-`STREAMDECK_PORT` deve ser um inteiro de `1` a `65535`. O valor de
-`STREAMDECK_HOST` é encaminhado ao Uvicorn. O padrão `127.0.0.1` é intencional:
-a Fase 1 ainda não possui pareamento nem autenticação para proteger alterações
-vindas da rede. Não use `0.0.0.0` ou outro bind remoto em uma rede não confiável;
-essa exposição será documentada novamente somente após a Fase 2.
+O código deve ter de 6 a 64 caracteres ASCII (`A-Z`, `a-z`, `0-9`, `.`, `_` ou
+`-`). Quando `STREAMDECK_PAIRING_CODE` existe, `STREAMDECK_REQUIRE_AUTH` assume
+`true` automaticamente. O servidor rejeita binds remotos sem autenticação.
 
-The file `.env.example` documents the bind variables, but it is only an
-example and is **not loaded automatically**. Export or set the variables in
-the process environment explicitly; this project does not add `python-dotenv`.
-`STREAMDECK_DATABASE_PATH` selects the local SQLite file and defaults to
-`server/data/streamdeck.sqlite3`.
+Para o emulador Android padrão, use no aplicativo:
 
-## Versioned HTTP API
+```text
+http://10.0.2.2:8765
+```
 
-The API is available under `/api/v1`:
+Em um celular físico, use o IP privado do Windows na rede local, por exemplo
+`http://192.168.x.x:8765`. O firewall do Windows deve permitir a porta somente
+na rede privada apropriada; essa regra ainda é uma etapa operacional manual.
 
-- `GET /api/v1/profile` returns the active profile.
-- `GET /api/v1/profiles/{profile_id}/snapshot` returns the current snapshot;
-  pass `?revision=N` for an exact historical revision (`N >= 1`).
-- `GET /api/v1/actions` returns the closed catalog in stable order:
-  `hotkey`, `key`, `media`, `text`, `url`, `application`.
-- `PUT /api/v1/profiles/{profile_id}?expected_revision=N` validates and stores
-  the next profile revision. The URL ID and body ID must match.
+## Pareamento e autenticação
 
-The action catalog is descriptive only. The HTTP API does not execute shell,
-command, subprocess, or arbitrary Windows actions. Validation, not-found,
-conflict, and internal failures use the sanitized shape:
+O endpoint de pareamento é:
+
+```text
+POST /api/v1/pairing/claim
+```
+
+Corpo:
+
+```json
+{
+  "client_id": "android-emulator",
+  "client_version": "0.1.0",
+  "pairing_code": "<código configurado fora do repositório>"
+}
+```
+
+A resposta contém um token opaco. O banco grava somente o hash SHA-256 do token;
+o token em claro é retornado apenas nessa resposta. O aplicativo Android o
+armazena criptografado com AES-GCM, por uma chave não exportável do Android
+Keystore, e o vincula ao endpoint que emitiu o pareamento. Um novo pareamento do
+mesmo `client_id` substitui o token anterior.
+
+O WebSocket autenticado é:
+
+```text
+ws://<host>:<porta>/api/v1/ws
+```
+
+O cliente envia o token dentro de `hello.payload.access_token`. Tokens ausentes
+ou inválidos são rejeitados antes de carregar o perfil. O token não deve ser
+colocado na URL, em logs ou em mensagens de diagnóstico.
+
+A comunicação desta fase usa HTTP/WS na rede local. Não exponha a porta à
+internet. TLS/mTLS e rotação administrativa de dispositivos pertencem ao
+hardening posterior.
+
+## API HTTP de perfil
+
+A API fica sob `/api/v1`:
+
+- `GET /api/v1/profile` retorna o perfil ativo.
+- `GET /api/v1/profiles/{profile_id}/snapshot` retorna um snapshot; use
+  `?revision=N` para revisão histórica (`N >= 1`).
+- `GET /api/v1/actions` retorna o catálogo fechado: `hotkey`, `key`, `media`,
+  `text`, `url`, `application`.
+- `PUT /api/v1/profiles/{profile_id}?expected_revision=N` valida e persiste a
+  próxima revisão.
+
+Falhas usam sempre a forma sanitizada:
 
 ```json
 {"code":"PROFILE_REVISION_CONFLICT","message":"Profile revision conflict","retryable":true}
 ```
 
-## WebSocket de sincronização
+O servidor não executa shell, `command`, `subprocess` ou ações arbitrárias.
 
-O canal da Fase 1 fica em `ws://127.0.0.1:8765/api/v1/ws` e usa os envelopes
-do schema compartilhado v1:
+## WebSocket e limites
 
-1. o cliente envia `hello` com `client_id`, versão e `[1]` em
-   `supported_protocol_versions`;
-2. o servidor responde `welcome` e `profile_snapshot`;
+Handshake normal:
+
+1. cliente envia `hello` com identidade, versão, `[1]` e token;
+2. servidor responde `welcome` e `profile_snapshot`;
 3. `ping` recebe `pong` com o mesmo `nonce`;
-4. `press` valida perfil, revisão, página e botão e responde `ack` ou `error`;
-5. alterações persistidas por HTTP geram `profile_changed` para as sessões
-   conectadas.
+4. `press` valida o perfil/página/botão e, nesta fase, ainda retorna `rejected`;
+5. alterações HTTP geram `profile_changed` para sessões do mesmo perfil.
 
-Nesta fase o `ack` de um botão válido tem status `rejected`, pois os
-adaptadores de execução de ações ainda pertencem às fases seguintes. O canal
-encerra handshakes sem `hello` e sessões ociosas com erros estruturados e não
-aceita envelopes `shell`, `command` ou campos extras.
+Limites de transporte:
 
-Limites e semântica de transporte da Fase 1:
+- no máximo `32` conexões simultâneas;
+- frame textual máximo de `256 KiB`;
+- timeout de handshake de `5 s`;
+- timeout de inatividade de `60 s`;
+- envio de broadcast com timeout individual de `1 s`;
+- conexões lentas/quebradas são removidas sem bloquear as demais.
 
-- no máximo `32` conexões WebSocket simultâneas;
-- frames textuais acima de `256 KiB` são rejeitados;
-- cada envio de broadcast tem timeout de `1 s`; conexões lentas ou quebradas
-  são removidas sem bloquear as demais;
-- broadcasts são serializados por perfil e revisões antigas não são reenviadas;
-- conflitos de revisão são `retryable` e não ficam cacheados por
-  `request_id`, permitindo repetir a solicitação após sincronizar a revisão.
-
-## Development checks
+## Verificações de desenvolvimento
 
 ```bash
-uv run pytest -q
-uv run ruff check .
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync pytest -q
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync ruff check .
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync python -m compileall -q app
+uv lock --check
+git diff --check
 ```

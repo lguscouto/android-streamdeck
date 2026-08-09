@@ -58,13 +58,17 @@ def test_fresh_database_bootstraps_latest_schema_and_is_idempotent(
 
     database.migrate()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert (
+            connection.execute("PRAGMA user_version").fetchone()[0]
+            == LATEST_SCHEMA_VERSION
+        )
         assert tables == {
             "profiles",
             "pages",
             "buttons",
             "actions",
             "profile_revisions",
+            "paired_clients",
         }
 
 
@@ -92,6 +96,7 @@ def test_in_memory_database_stays_initialized_across_connections() -> None:
         "buttons",
         "actions",
         "profile_revisions",
+        "paired_clients",
     }
 
     profile = load_profile()

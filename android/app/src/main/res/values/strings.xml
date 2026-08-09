@@ -2,6 +2,16 @@
 <resources>
     <string name="app_name">Android Stream Deck</string>
     <string name="app_title">Android Stream Deck</string>
-    <string name="app_subtitle">Esqueleto inicial do aplicativo</string>
-    <string name="server_not_connected">Servidor ainda não conectado</string>
+    <string name="phase2_subtitle">Pareie este celular com o servidor Windows</string>
+    <string name="server_address_label">Endereço do servidor</string>
+    <string name="client_id_label">Identificador deste celular</string>
+    <string name="pairing_code_label">Código de pareamento</string>
+    <string name="pairing_code_supporting_text">Use o código configurado no servidor</string>
+    <string name="pair_and_connect">Parear e conectar</string>
+    <string name="clear_pairing">Limpar pareamento</string>
+    <string name="status_disconnected">Desconectado</string>
+    <string name="status_connecting">Conectando…</string>
+    <string name="status_connected">Conectado</string>
+    <string name="status_error">Erro de conexão</string>
+    <string name="profile_revision">Perfil sincronizado na revisão %1$d</string>
 </resources>

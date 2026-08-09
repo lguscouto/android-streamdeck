@@ -10,6 +10,7 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
+from app.pairing import PairingError, PairingService
 from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
 from app.schemas import (
     AckMessage,
@@ -82,6 +83,8 @@ class WebSocketManager:
         idle_timeout: float = DEFAULT_IDLE_TIMEOUT,
         send_timeout: float = DEFAULT_SEND_TIMEOUT,
         max_connections: int = MAX_CONNECTIONS,
+        pairing_service: PairingService | None = None,
+        require_auth: bool = False,
     ) -> None:
         self.repository = repository
         self.server_id = server_id
@@ -90,6 +93,8 @@ class WebSocketManager:
         self.idle_timeout = idle_timeout
         self.send_timeout = send_timeout
         self.max_connections = max_connections
+        self.pairing_service = pairing_service
+        self.require_auth = require_auth
         self._sessions: dict[WebSocket, ClientSession] = {}
         self._broadcast_lock = asyncio.Lock()
         self._last_broadcast_revision: dict[str, int] = {}
@@ -378,6 +383,33 @@ async def _serve_websocket(
             await _send_invalid_message(websocket)
             await websocket.close(code=1002)
             return
+
+        if manager.require_auth:
+            pairing_service = manager.pairing_service
+            if pairing_service is None or hello.payload.access_token is None:
+                await _send_error(
+                    websocket,
+                    "AUTH_REQUIRED",
+                    "Authenticated WebSocket session required",
+                )
+                await websocket.close(code=1008)
+                return
+            try:
+                authenticated = await run_in_threadpool(
+                    pairing_service.authenticate,
+                    hello.payload.client_id,
+                    hello.payload.access_token,
+                )
+            except PairingError:
+                authenticated = False
+            if not authenticated:
+                await _send_error(
+                    websocket,
+                    "AUTH_INVALID",
+                    "WebSocket authentication failed",
+                )
+                await websocket.close(code=1008)
+                return
 
         remaining_handshake = manager.handshake_timeout - (
             asyncio.get_running_loop().time() - handshake_started

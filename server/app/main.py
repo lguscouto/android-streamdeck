@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from app.api import create_router, register_exception_handlers
 from app.config import Settings
 from app.db import Database
+from app.pairing import PairingService
 from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
 from app.schemas import Profile
 from app.websocket import WebSocketManager, create_websocket_router
@@ -52,14 +53,28 @@ def create_app(
     else:
         database = getattr(repository, "database", None)
 
-    active_websocket_manager = websocket_manager or WebSocketManager(repository)
+    if database is None:
+        raise RuntimeError("pairing requires a database-backed repository")
+    pairing_service = PairingService(database, runtime_settings.pairing_code)
+    active_websocket_manager = websocket_manager or WebSocketManager(
+        repository,
+        pairing_service=pairing_service,
+        require_auth=runtime_settings.require_auth,
+    )
     application = FastAPI(title=SERVICE_NAME, version=PROTOCOL_VERSION)
     application.state.settings = runtime_settings
     application.state.database = database
     application.state.profile_repository = repository
+    application.state.pairing_service = pairing_service
     application.state.websocket_manager = active_websocket_manager
     register_exception_handlers(application)
-    application.include_router(create_router(repository, active_websocket_manager))
+    application.include_router(
+        create_router(
+            repository,
+            active_websocket_manager,
+            pairing_service,
+        )
+    )
     application.include_router(
         create_websocket_router(repository, active_websocket_manager)
     )
