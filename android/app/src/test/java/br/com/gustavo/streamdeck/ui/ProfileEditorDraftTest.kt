@@ -50,6 +50,20 @@ class ProfileEditorDraftTest {
             .applyTo(sampleSnapshot())
     }
 
+    @Test
+    fun `reverter alteracoes restaura exatamente o registro original`() {
+        val original = sampleSnapshot()
+        val editedDraft = ProfileEditorDraft.from(original).copy(
+            profileName = "Nome errado",
+            title = "Titulo errado",
+        )
+
+        // Undo = restaurar o draft original e reaplicá-lo reproduz o original.
+        val restored = ProfileEditorDraft.from(original).applyTo(original)
+        assertEquals(original, restored)
+        assertNotEquals(original.profileName, editedDraft.applyTo(original).profileName)
+    }
+
     private fun sampleSnapshot(): StreamDeckProfileSnapshot {
         val first = StreamDeckButton(
             id = "first",

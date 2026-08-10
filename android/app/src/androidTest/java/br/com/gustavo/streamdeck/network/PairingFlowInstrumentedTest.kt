@@ -92,13 +92,11 @@ class PairingFlowInstrumentedTest {
             while (
                 (target == null || target.visibleBounds.isEmpty) && attempt < 8
             ) {
-                // Close the IME only while a text field holds focus.
+                // Close the IME only while a text field holds focus; pressing
+                // BACK with no IME open would close the Activity.
                 if (device.hasObject(By.focused(true))) {
                     device.pressBack()
                     Thread.sleep(300)
-                }
-                if (attempt == 0) {
-                    Thread.sleep(400)
                 }
                 // Manual swipe up (content moves up) — reliable even when the
                 // first By.scrollable node is a horizontal action row.

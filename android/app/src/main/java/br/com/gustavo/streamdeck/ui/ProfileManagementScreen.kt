@@ -22,6 +22,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import br.com.gustavo.streamdeck.network.RemoteProfileSummary
@@ -94,8 +97,20 @@ fun ProfileManagementScreen(
         if (loading) {
             Text("Carregando…")
         }
-        successMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-        errorMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        successMessage?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        errorMessage?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
 
         if (conflictCode != null) {
             HorizontalDivider()

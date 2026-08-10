@@ -16,7 +16,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import br.com.gustavo.streamdeck.R
 import br.com.gustavo.streamdeck.network.StreamDeckProfileSnapshot
 
 @Composable
@@ -25,9 +32,11 @@ fun ProfileEditorScreen(
     draft: ProfileEditorDraft,
     saving: Boolean,
     errorMessage: String?,
+    hasChangesToRevert: Boolean,
     onDraftChange: (ProfileEditorDraft) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit,
+    onRevert: () -> Unit,
 ) {
     val mediaCommands = listOf(
         "play_pause",
@@ -71,10 +80,16 @@ fun ProfileEditorScreen(
         ) {
             snapshot.activePage.buttons.forEach { button ->
                 val selected = button.id == draft.selectedButtonId
+                val selectedLabel = stringResource(R.string.a11y_button_selected)
+                val selectLabel = stringResource(R.string.a11y_button_select, button.title)
                 if (selected) {
                     Button(
                         onClick = {},
                         enabled = !saving,
+                        modifier = Modifier.semantics {
+                            contentDescription = button.title
+                            stateDescription = selectedLabel
+                        },
                     ) {
                         Text(button.title)
                     }
@@ -84,6 +99,7 @@ fun ProfileEditorScreen(
                             onDraftChange(draft.selectButton(snapshot, button.id))
                         },
                         enabled = !saving,
+                        modifier = Modifier.semantics { contentDescription = selectLabel },
                     ) {
                         Text(button.title)
                     }
@@ -202,7 +218,20 @@ fun ProfileEditorScreen(
             )
         }
         errorMessage?.let { message ->
-            Text(message, color = MaterialTheme.colorScheme.error)
+            Text(
+                message,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        if (hasChangesToRevert) {
+            OutlinedButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onRevert,
+                enabled = !saving,
+            ) {
+                Text("Reverter alterações")
+            }
         }
         Row(
             modifier = Modifier.fillMaxWidth(),

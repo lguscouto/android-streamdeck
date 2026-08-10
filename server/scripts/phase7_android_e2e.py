@@ -86,7 +86,9 @@ def main() -> None:
         environment = os.environ.copy()
         environment.update(
             {
-                "STREAMDECK_HOST": "0.0.0.0",
+                # nosec B104: intentional 0.0.0.0 bind so the Android emulator
+                # (10.0.2.2) can reach this disposable TLS test server.
+                "STREAMDECK_HOST": "0.0.0.0",  # nosec B104
                 "STREAMDECK_PORT": str(port),
                 "STREAMDECK_DATABASE_PATH": str(root / "streamdeck.sqlite3"),
                 "STREAMDECK_PAIRING_CODE": pairing_code,

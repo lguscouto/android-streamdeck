@@ -83,12 +83,17 @@ class Database:
     release = close
 
     def initialize(self) -> None:
-        """Apply all migrations to the configured database."""
-        connection = self.connect()
-        try:
-            migrate(connection)
-        finally:
-            connection.close()
+        """Apply all migrations to the configured database.
+
+        Serialized with the instance lock so concurrent startup/migration cannot
+        race ``BEGIN``/DDL on a single-process server.
+        """
+        with self._lock:
+            connection = self.connect()
+            try:
+                migrate(connection)
+            finally:
+                connection.close()
 
     migrate = initialize
 

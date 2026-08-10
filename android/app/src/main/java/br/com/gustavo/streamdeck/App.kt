@@ -26,6 +26,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import br.com.gustavo.streamdeck.network.ActionAcknowledgementStatus
@@ -117,6 +120,7 @@ private fun PairingScreen() {
     var pendingPresses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var editingProfile by remember { mutableStateOf(false) }
     var editorDraft by remember { mutableStateOf<ProfileEditorDraft?>(null) }
+    var editorOriginalDraft by remember { mutableStateOf<ProfileEditorDraft?>(null) }
     var savingProfile by remember { mutableStateOf(false) }
     var editorError by remember { mutableStateOf<String?>(null) }
     var managingProfiles by remember { mutableStateOf(false) }
@@ -343,6 +347,7 @@ private fun PairingScreen() {
     fun startEditing() {
         val snapshot = profileSnapshot ?: return
         editorDraft = ProfileEditorDraft.from(snapshot)
+        editorOriginalDraft = editorDraft
         editorError = null
         editingProfile = true
     }
@@ -351,8 +356,16 @@ private fun PairingScreen() {
         profileSnapshot?.let { snapshot ->
             editorDraft = ProfileEditorDraft.from(snapshot)
         }
+        editorOriginalDraft = null
         editorError = null
         editingProfile = false
+    }
+
+    fun revertEditing() {
+        val original = editorOriginalDraft ?: return
+        editorDraft = original
+        editorError = null
+        statusMessage = "Alterações revertidas"
     }
 
     fun saveProfile() {
@@ -390,6 +403,7 @@ private fun PairingScreen() {
                 val confirmed = ProfileSnapshotParser.parseWireProfile(response)
                 profileSnapshot = confirmed
                 editorDraft = ProfileEditorDraft.from(confirmed)
+                editorOriginalDraft = null
                 savingProfile = false
                 editingProfile = false
                 editorError = null
@@ -855,9 +869,13 @@ private fun PairingScreen() {
             draft = draft,
             saving = savingProfile,
             errorMessage = editorError,
+            // Undo is a recovery action for save failures (roadmap Fase 4):
+            // it only appears after a failed save, when a revert is meaningful.
+            hasChangesToRevert = editorOriginalDraft != null && editorError != null,
             onDraftChange = { editorDraft = it },
             onSave = ::saveProfile,
             onCancel = ::cancelEditing,
+            onRevert = ::revertEditing,
         )
     } else {
         ConnectedDeckScreen(
@@ -1056,7 +1074,11 @@ private fun ConnectionStatusBlock(
         style = MaterialTheme.typography.titleMedium,
     )
     statusMessage?.let { message ->
-        Text(text = message, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
     }
     revision?.let { currentRevision ->
         Text(

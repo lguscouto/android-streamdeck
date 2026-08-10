@@ -25,4 +25,6 @@
     <string name="status_connected">Conectado</string>
     <string name="status_error">Erro de conexão</string>
     <string name="profile_revision">Perfil sincronizado na revisão %1$d</string>
+    <string name="a11y_button_selected">Selecionado</string>
+    <string name="a11y_button_select">Selecionar botão %1$s</string>
 </resources>

@@ -43,6 +43,14 @@ jobs:
         run: uv run --no-sync ruff check .
       - name: Compile all Python
         run: uv run --no-sync python -m compileall -q app scripts
+      - name: Bandit security scan (medium+)
+        run: uv run --no-sync bandit -q -ll -r app scripts
+      - name: pip-audit dependency vulnerabilities
+        run: uv run --no-sync pip-audit
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Lockfile healthy
         run: uv lock --check
 
