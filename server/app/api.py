@@ -648,6 +648,11 @@ def create_router(
             raise APIError(404, "DEVICE_NOT_FOUND", "Device not found", False)
         _safe_call(pairing_service.revoke_client, client_id, payload.reason)
         await _invalidate_client_sessions(websocket_manager, client_id)
+        LOGGER.warning(
+            "DEVICE_REVOKED client_id=%s reason=%s",
+            client_id,
+            payload.reason,
+        )
         updated = _safe_call(pairing_service.list_clients)
         device = next(device for device in updated if device["client_id"] == client_id)
         return JSONResponse(content={"device": device})

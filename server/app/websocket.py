@@ -12,6 +12,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.actions import ActionExecutionRejected, ActionExecutor, ActionRegistry
 from app.pairing import PairingError, PairingService
+from app.rate_limit import AttemptRateLimiter
 from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
 from app.schemas import (
     AckMessage,
@@ -91,6 +92,7 @@ class WebSocketManager:
         pairing_service: PairingService | None = None,
         require_auth: bool = False,
         action_executor: ActionExecutor | None = None,
+        handshake_rate_limiter: AttemptRateLimiter | None = None,
     ) -> None:
         self.repository = repository
         self.server_id = server_id
@@ -102,6 +104,7 @@ class WebSocketManager:
         self.pairing_service = pairing_service
         self.require_auth = require_auth
         self.action_executor = action_executor or ActionRegistry()
+        self.handshake_rate_limiter = handshake_rate_limiter or AttemptRateLimiter()
         self._sessions: dict[WebSocket, ClientSession] = {}
         self._broadcast_lock = asyncio.Lock()
         self._last_broadcast_revision: dict[str, int] = {}
@@ -471,6 +474,19 @@ async def _serve_websocket(
     await websocket.accept()
     session: ClientSession | None = None
     handshake_started = asyncio.get_running_loop().time()
+
+    origin = websocket.client.host if websocket.client is not None else "unknown"
+    if not manager.handshake_rate_limiter.allow(origin):
+        LOGGER.warning("WS_RATE_LIMITED origin=%s", origin)
+        await _send_error(
+            websocket,
+            "RATE_LIMITED",
+            "Too many WebSocket handshake attempts",
+            retryable=True,
+        )
+        await websocket.close(code=1013)
+        return
+
     try:
         try:
             raw_hello = await asyncio.wait_for(
@@ -508,6 +524,10 @@ async def _serve_websocket(
             except PairingError:
                 credential_generation = None
             if credential_generation is None:
+                LOGGER.warning(
+                    "WS_AUTH_FAILED client_id=%s",
+                    hello.payload.client_id,
+                )
                 await _send_error(
                     websocket,
                     "AUTH_INVALID",

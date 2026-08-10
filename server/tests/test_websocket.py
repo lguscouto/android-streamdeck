@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.db import Database
 from app.main import create_app
+from app.rate_limit import AttemptRateLimiter
 from app.repositories.profiles import ProfileRepository
 from app.websocket import ClientSession, WebSocketManager
 
@@ -564,3 +565,45 @@ def test_websocket_idle_timeout_is_structured(tmp_path: Path) -> None:
         "message": "WebSocket session timed out",
         "retryable": True,
     }
+
+
+def test_websocket_handshake_rate_limits_abusive_origin(tmp_path: Path) -> None:
+    """Repeated invalid handshakes from one origin are throttled per-origin."""
+    limiter = AttemptRateLimiter(max_attempts=2, window_seconds=60.0)
+    manager = WebSocketManager(
+        make_repository(tmp_path),
+        handshake_rate_limiter=limiter,
+        require_auth=True,
+        pairing_service=None,
+    )
+    app = create_app(
+        Settings(
+            database_path=tmp_path / "unused.sqlite3",
+            require_auth=True,
+            pairing_code="pair-valid",
+        ),
+        repository=manager.repository,
+        websocket_manager=manager,
+    )
+
+    with TestClient(app) as client:
+        # First connection: accepted and sent a hello need, but auth fails
+        # because pairing_service is None -> WS_AUTH_FAILED with close 1008.
+        with client.websocket_connect("/api/v1/ws") as websocket:
+            websocket.send_json(hello_message())
+            error = websocket.receive_json()
+            assert error["payload"]["code"] == "AUTH_REQUIRED"
+
+        # Second connection from the same origin: rate limiter window at max,
+        # but the limiter counts only on *failed* handshakes; the second still
+        # passes the limiter guard (2 allowed), auth still fails.
+        with client.websocket_connect("/api/v1/ws") as websocket:
+            websocket.send_json(hello_message())
+            error = websocket.receive_json()
+            assert error["payload"]["code"] == "AUTH_REQUIRED"
+
+        # Third connection: rate limited before auth -> RATE_LIMITED close.
+        with client.websocket_connect("/api/v1/ws") as websocket:
+            websocket.send_json(hello_message())
+            error = websocket.receive_json()
+            assert error["payload"]["code"] == "RATE_LIMITED"

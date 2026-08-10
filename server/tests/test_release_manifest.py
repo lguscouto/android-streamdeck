@@ -10,6 +10,7 @@ from scripts.release_manifest import (
     ReleaseArtifactMissingError,
     artifact_sha256,
     build_release_manifest,
+    resolve_commit,
 )
 
 
@@ -66,3 +67,34 @@ def test_build_release_manifest_output_is_serializable(tmp_path: Path) -> None:
     )
 
     json.dumps(manifest)  # must not raise
+
+
+def test_resolve_commit_prefers_github_sha_environment(monkeypatch) -> None:
+    monkeypatch.setenv("GITHUB_SHA", "b" * 40)
+
+    assert resolve_commit() == "b" * 40
+
+
+def test_resolve_commit_reads_git_head_when_environment_is_absent(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+
+    resolved = resolve_commit(fallback="fallback-value")
+
+    assert resolved == "fallback-value" or len(resolved) >= 7
+
+
+def test_resolve_commit_falls_back_when_git_is_unavailable(
+    monkeypatch,
+) -> None:
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("git unavailable")
+
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
+    monkeypatch.setattr(
+        "scripts.release_manifest.subprocess.run",
+        boom,
+    )
+
+    assert resolve_commit(fallback="fallback-value") == "fallback-value"

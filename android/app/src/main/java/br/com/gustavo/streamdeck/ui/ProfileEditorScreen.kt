@@ -155,14 +155,14 @@ fun ProfileEditorScreen(
                     singleLine = true,
                     enabled = !saving,
                 )
-                actionValueField(
+                ActionValueField(
                     value = draft.actionValue,
                     label = "Tecla",
                     enabled = !saving,
                     onValueChange = { onDraftChange(draft.copy(actionValue = it)) },
                 )
             }
-            EditorActionType.KEY -> actionValueField(
+            EditorActionType.KEY -> ActionValueField(
                 value = draft.actionValue,
                 label = "Tecla",
                 enabled = !saving,
@@ -181,20 +181,20 @@ fun ProfileEditorScreen(
                     Text("Comando de mídia: ${draft.actionValue}")
                 }
             }
-            EditorActionType.TEXT -> actionValueField(
+            EditorActionType.TEXT -> ActionValueField(
                 value = draft.actionValue,
                 label = "Texto a digitar",
                 enabled = !saving,
                 singleLine = false,
                 onValueChange = { onDraftChange(draft.copy(actionValue = it)) },
             )
-            EditorActionType.URL -> actionValueField(
+            EditorActionType.URL -> ActionValueField(
                 value = draft.actionValue,
                 label = "URL HTTPS",
                 enabled = !saving,
                 onValueChange = { onDraftChange(draft.copy(actionValue = it)) },
             )
-            EditorActionType.APPLICATION -> actionValueField(
+            EditorActionType.APPLICATION -> ActionValueField(
                 value = draft.actionValue,
                 label = "ID da aplicação",
                 enabled = !saving,
@@ -227,7 +227,7 @@ fun ProfileEditorScreen(
 }
 
 @Composable
-private fun actionValueField(
+private fun ActionValueField(
     value: String,
     label: String,
     enabled: Boolean,

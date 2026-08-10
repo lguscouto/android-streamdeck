@@ -67,6 +67,10 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        buildConfigField("String", "APPLICATION_ID", "\"br.com.gustavo.streamdeck\"")
+        buildConfigField("int", "VERSION_CODE", "1")
+        buildConfigField("String", "VERSION_NAME", "\"0.1.0\"")
     }
 
     signingConfigs {
@@ -95,6 +99,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -110,6 +115,15 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
+    }
+
+    lint {
+        // Check dependencies transitively so a regression in a library cannot
+        // silently pass lint. warningsAsErrors is NOT enabled because several
+        // remaining warnings are dependency-upgrade suggestions that could
+        // require a newer AGP/Kotlin than the pinned toolchain (see
+        // docs/phase-9-delivery.md for the decision record).
+        checkDependencies = true
     }
 }
 

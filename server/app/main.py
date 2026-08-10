@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from pydantic import BaseModel
 
 from app.actions import ActionExecutor
 from app.api import create_router, register_exception_handlers
+from app.body_limit import register_body_limit
 from app.config import Settings
 from app.db import Database
 from app.pairing import PairingService
@@ -19,6 +21,7 @@ from app.websocket import WebSocketManager, create_websocket_router
 
 SERVICE_NAME = "android-streamdeck-server"
 PROTOCOL_VERSION = "0.1"
+LOGGER = logging.getLogger(__name__)
 
 
 def default_profile_path() -> Path:
@@ -76,6 +79,7 @@ def create_app(
     application.state.profile_repository = repository
     application.state.pairing_service = pairing_service
     application.state.websocket_manager = active_websocket_manager
+    register_body_limit(application)
     register_exception_handlers(application)
     application.include_router(
         create_router(
@@ -89,6 +93,27 @@ def create_app(
     application.include_router(
         create_websocket_router(repository, active_websocket_manager)
     )
+
+    @application.middleware("http")
+    async def sanitized_access_log(request: Request, call_next):
+        """Log sanitized HTTP access without any header, token, or body value."""
+        import time
+
+        started = time.monotonic()
+        response = await call_next(request)
+        duration_ms = (time.monotonic() - started) * 1000.0
+        origin = request.client.host if request.client is not None else None
+        LOGGER.info(
+            "HTTP_ACCESS",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": round(duration_ms, 1),
+                "origin": origin,
+            },
+        )
+        return response
 
     @application.get("/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:

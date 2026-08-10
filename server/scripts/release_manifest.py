@@ -2,12 +2,37 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
 
 class ReleaseArtifactMissingError(FileNotFoundError):
     """Raised when a required release artifact is absent or is a directory."""
+
+
+def resolve_commit(*, fallback: str = "unknown") -> str:
+    """Return the commit identity for the manifest.
+
+    Precedence: the ``GITHUB_SHA`` environment variable (GitHub Actions),
+    then ``git rev-parse HEAD`` from the repository, then ``fallback``.
+    """
+    environment_sha = os.environ.get("GITHUB_SHA", "").strip()
+    if environment_sha:
+        return environment_sha
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return fallback
+    resolved = completed.stdout.strip()
+    return resolved if resolved else fallback
 
 
 def artifact_sha256(path: Path) -> str:
@@ -73,7 +98,7 @@ def main() -> int:
         / "app-release-unsigned.apk",
     }
     manifest = build_release_manifest(
-        commit="unknown",
+        commit=resolve_commit(),
         server_version="0.1.0",
         android_version_name="0.1.0",
         android_version_code=1,

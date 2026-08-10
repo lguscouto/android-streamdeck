@@ -169,8 +169,8 @@ app-release-unsigned.apk  7.229.204 bytes  SHA-256 444c96c60fcbc26e5f4ae96ad58b5
   `Pixel_8`/API 35.
 - O cliente Android mantém **endpoint manual** (HTTPS/WSS); mDNS é apenas
   discovery auxiliar e não é raiz de confiança.
-- CI (GitHub Actions) ainda não automatiza os gates; a execução foi manual e
-  registrada neste documento.
+- A automatização dos gates em CI (GitHub Actions) foi entregue na Fase 9;
+  a execução da Fase 8 foi manual e registrada neste documento.
 - `R8/proguard-rules.pro` está referenciado no buildType release, mas
   `isMinifyEnabled=false`; não há shrinking ativo.
 

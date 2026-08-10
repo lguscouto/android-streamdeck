@@ -7,6 +7,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
+import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import br.com.gustavo.streamdeck.MainActivity
 import org.junit.Assert.assertEquals
@@ -56,7 +57,7 @@ class PairingFlowInstrumentedTest {
             fields[2].setText(pairingCode)
             fields[3].setText(caCertificatePem)
             fields[4].setText(trustCode)
-            device.findObject(By.text("Parear e conectar")).click()
+            tapByText("Parear e conectar")
             assertAuthenticatedProfile()
             assertActionFeedback()
             assertEditorSave()
@@ -76,7 +77,7 @@ class PairingFlowInstrumentedTest {
 
         ActivityScenario.launch(MainActivity::class.java).use {
             assertTrue(device.wait(Until.hasObject(By.text("Parear e conectar")), TIMEOUT_MS))
-            device.findObject(By.text("Parear e conectar")).click()
+            tapByText("Parear e conectar")
             assertAuthenticatedProfile(
                 revision = 2,
                 shortcutTitle = "Atalho fase 4",
@@ -84,21 +85,54 @@ class PairingFlowInstrumentedTest {
         }
     }
 
+    private fun tapByText(text: String) {
+        var target = device.wait(Until.findObject(By.text(text)), TIMEOUT_MS)
+        if (target == null || target.visibleBounds.isEmpty) {
+            var attempt = 0
+            while (
+                (target == null || target.visibleBounds.isEmpty) && attempt < 8
+            ) {
+                // Close the IME only while a text field holds focus.
+                if (device.hasObject(By.focused(true))) {
+                    device.pressBack()
+                    Thread.sleep(300)
+                }
+                if (attempt == 0) {
+                    Thread.sleep(400)
+                }
+                // Manual swipe up (content moves up) — reliable even when the
+                // first By.scrollable node is a horizontal action row.
+                device.swipe(
+                    device.displayWidth / 2,
+                    (device.displayHeight * 3) / 4,
+                    device.displayWidth / 2,
+                    device.displayHeight / 4,
+                    50,
+                )
+                target = device.wait(Until.findObject(By.text(text)), 2_000L)
+                attempt += 1
+            }
+        }
+        checkNotNull(target) { "element '$text' not found after scrolling. Visible: ${visibleNonSensitiveText()}" }
+        check(!target.visibleBounds.isEmpty) { "element '$text' not visible after scrolling. Visible: ${visibleNonSensitiveText()}" }
+        target.click()
+    }
+
     private fun assertActionFeedback() {
-        device.findObject(By.text("Atalho Ctrl+Shift+S")).click()
+        tapByText("Atalho Ctrl+Shift+S")
         assertTrue(device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS))
-        device.findObject(By.text("Reproduzir/pausar")).click()
+        tapByText("Reproduzir/pausar")
         assertTrue(device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS))
     }
 
     private fun assertEditorSave() {
-        device.findObject(By.text("Editar perfil")).click()
+        tapByText("Editar perfil")
         assertTextVisible("Revisão atual: 1")
         val fields = device.findObjects(By.clazz("android.widget.EditText"))
         assertTrue("editor did not expose editable fields", fields.size >= 9)
         fields[2].clear()
         fields[2].setText("Atalho fase 4")
-        device.findObject(By.text("Salvar perfil")).click()
+        tapByText("Salvar perfil")
         assertTextVisible("Perfil salvo na revisão 2")
         assertTextVisible("Atalho fase 4")
         assertTextVisible("Perfil sincronizado na revisão 2")

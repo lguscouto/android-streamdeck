@@ -272,7 +272,7 @@ fun ProfileManagementScreen(
                 singleLine = true,
                 enabled = !loading,
             )
-            numberField("Ordem da nova página", newPageOrder, { newPageOrder = it }, !loading)
+            NumberField("Ordem da nova página", newPageOrder, { newPageOrder = it }, !loading)
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
@@ -311,7 +311,7 @@ fun ProfileManagementScreen(
                 singleLine = true,
                 enabled = !loading,
             )
-            numberField("Nova ordem", reorderPageOrder, { reorderPageOrder = it }, !loading)
+            NumberField("Nova ordem", reorderPageOrder, { reorderPageOrder = it }, !loading)
             Button(
                 modifier = Modifier.fillMaxWidth(),
                 onClick = {
@@ -348,7 +348,7 @@ fun ProfileManagementScreen(
 }
 
 @Composable
-private fun numberField(
+private fun NumberField(
     label: String,
     value: String,
     onValueChange: (String) -> Unit,

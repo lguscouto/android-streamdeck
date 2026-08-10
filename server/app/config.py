@@ -46,8 +46,16 @@ def default_tls_state_dir() -> Path:
     return root / "AndroidStreamDeck" / "tls"
 
 
+def default_log_dir() -> Path:
+    """Keep log files with the mutable runtime state, never in the bundle."""
+    from app.logging_config import default_log_dir as _default_log_dir
+
+    return _default_log_dir()
+
+
 DEFAULT_DATABASE_PATH = default_database_path()
 DEFAULT_TLS_STATE_DIR = default_tls_state_dir()
+DEFAULT_LOG_DIR = default_log_dir()
 
 
 def _is_rfc1918_ipv4_host(host: str) -> bool:
@@ -73,6 +81,7 @@ class Settings:
     tls_mode: str = DEFAULT_TLS_MODE
     tls_state_dir: str | Path = DEFAULT_TLS_STATE_DIR
     tls_identities: tuple[str, ...] = ()
+    log_dir: str | Path = DEFAULT_LOG_DIR
 
     def __post_init__(self) -> None:
         if not 1 <= self.port <= 65535:
@@ -148,6 +157,7 @@ class Settings:
             os.getenv("STREAMDECK_DISCOVERY_NAME", DEFAULT_DISCOVERY_NAME).strip()
             or DEFAULT_DISCOVERY_NAME
         )
+        log_dir = os.getenv("STREAMDECK_LOG_DIR", "").strip() or DEFAULT_LOG_DIR
 
         try:
             port = int(raw_port)
@@ -182,4 +192,5 @@ class Settings:
             tls_mode=tls_mode,
             tls_state_dir=tls_state_dir or DEFAULT_TLS_STATE_DIR,
             tls_identities=tls_identities,
+            log_dir=log_dir,
         )

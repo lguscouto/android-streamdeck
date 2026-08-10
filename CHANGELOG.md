@@ -7,6 +7,54 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o
 projeto adota [Versionamento Semântico](https://semver.org/lang/pt-BR/) para
 versões de produto; fases de desenvolvimento têm identificadores próprios.
 
+## [Fase 9] — 2026-08-10 — CI sem segredos e hardening de borda/observabilidade
+
+### Adicionado
+
+- **CI GitHub Actions** (`.github/workflows/gates.yml`): jobs `server` (ubuntu,
+  uv --locked, pytest 349/2 skips NTFS, ruff, compileall, lock), `android`
+  (JDK 17 + SDK 35, unit/lint/assemble + gate `RELEASE_SIGNING=unsigned`) e
+  `windows-bundle` (windows-latest, PyInstaller + smoke), com
+  `permissions: contents: read` e zero segredos; `gradlew` com bit de execução
+  para o runner Linux.
+- **Logs estruturados JSON sem segredos** (`server/app/logging_config.py`):
+  formatter JSON, `RotatingFileHandler` em `%LOCALAPPDATA%\AndroidStreamDeck\logs`,
+  middleware de access-log sanitizado (`HTTP_ACCESS`) e eventos de segurança
+  como códigos estáveis (`DEVICE_REVOKED`, `WS_AUTH_FAILED`); teste `caplog`
+  garante que pairing/admin/token nunca aparecem.
+- **Cap global de payload** (`server/app/body_limit.py`): 413 `PAYLOAD_TOO_LARGE`
+  em `POST/PUT/PATCH` acima de 1 MiB, antes do parse Pydantic (o import mantém
+  seu cap próprio de 512 KiB).
+- **Rate limit de handshake WebSocket por origem** (`AttemptRateLimiter` 5/60s,
+  fechamento `1013 RATE_LIMITED`) sem afetar outras origens.
+- **Fonte única de metadados Android**: `buildConfig=true` +
+  `buildConfigField`; `AppMetadata` lê de `BuildConfig`; teste anti-drift.
+- **Backup seguro**: `res/xml/data_extraction_rules.xml` exclui tudo
+  (cloud-backup e device-transfer) + `fullBackupContent=false` +
+  `android:dataExtractionRules` — cobre transferência device-to-device.
+- **Edge-to-edge (targetSdk 35)**: `enableEdgeToEdge()` + `safeDrawing` insets
+  + formulários roláveis; tema sem `statusBarColor`/`navigationBarColor` legados.
+- **Lint**: `lint { checkDependencies = true }`; 13 → 10 warnings (eliminadas
+  2 `ComposableNaming` e 1 `DataExtractionRules`; restam 9 `GradleDependency` e
+  1 `ObsoleteSdkInt` aceitas e documentadas).
+- `android/app/proguard-rules.pro` (guarda para futuro R8; minify continua off).
+- `release_manifest.py` lê commit real (`GITHUB_SHA` → `git rev-parse`).
+
+### Validado
+
+- Servidor: `349 passed`; Ruff/lint/compile/lock/diff limpos.
+- Bundle: `health=ok; export=ok; import=ok; port_released=true; temporary_state_removed=true`.
+- Android: `45` testes unit, `0` falhas; lint `0` erros; manifesto release com
+  `allowBackup=false`, `fullBackupContent=false`, `usesCleartextTraffic=false`
+  e `dataExtractionRules`; Pixel_8 abre sem crash.
+- E2E Fase 7 reexecutado: `https_health=ok`; `android_https_wss_e2e=ok`.
+
+### Pendente / limitações
+
+- Primeira execução real do CI no GitHub precisa ser observada (tempos, skips,
+  licenças SDK) e refletida em `docs/phase-9-delivery.md`.
+- APK release continua **unsigned**; Galaxy A10 não validado fisicamente.
+
 ## [Fase 8] — 2026-08-10 — Release verificável
 
 ### Corrigido
@@ -51,7 +99,7 @@ versões de produto; fases de desenvolvimento têm identificadores próprios.
 
 - APK release permanece **unsigned** (exige keystore externo autorizado).
 - Galaxy A10 não validado fisicamente.
-- CI (GitHub Actions) ainda não automatiza os gates.
+- CI automatizado dos gates foi entregue na Fase 9.
 
 ## [Fase 7] — 2026-08-10 — TLS/WSS e administração de dispositivos
 

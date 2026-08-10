@@ -11,4 +11,11 @@ class AppMetadataTest {
         assertEquals(1, AppMetadata.VERSION_CODE)
         assertEquals("br.com.gustavo.streamdeck", AppMetadata.APPLICATION_ID)
     }
+
+    @Test
+    fun `metadados sao a mesma fonte que o BuildConfig gerado`() {
+        assertEquals(BuildConfig.APPLICATION_ID, AppMetadata.applicationId)
+        assertEquals(BuildConfig.VERSION_CODE, AppMetadata.versionCode)
+        assertEquals(BuildConfig.VERSION_NAME, AppMetadata.versionName)
+    }
 }
