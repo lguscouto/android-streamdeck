@@ -48,11 +48,12 @@ versões de produto; fases de desenvolvimento têm identificadores próprios.
   `allowBackup=false`, `fullBackupContent=false`, `usesCleartextTraffic=false`
   e `dataExtractionRules`; Pixel_8 abre sem crash.
 - E2E Fase 7 reexecutado: `https_health=ok`; `android_https_wss_e2e=ok`.
+- **CI real no GitHub**: primeira rodada revelou 2 testes sensíveis a
+  `os.pathsep` (falhavam só no Linux); corrigido e rodada final verde —
+  Server 20s, Android 2m55s, Windows bundle 1m6s.
 
 ### Pendente / limitações
 
-- Primeira execução real do CI no GitHub precisa ser observada (tempos, skips,
-  licenças SDK) e refletida em `docs/phase-9-delivery.md`.
 - APK release continua **unsigned**; Galaxy A10 não validado fisicamente.
 
 ## [Fase 8] — 2026-08-10 — Release verificável

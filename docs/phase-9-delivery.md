@@ -97,6 +97,25 @@
 | Smoke TLS Fase 7 | `https_health=ok; port_released=true` |
 | E2E Android HTTPS/WSS Fase 7 (Pixel_8) | `android_https_wss_e2e=ok; port_released=true; temporary_state_removed=true` |
 
+## Execução observada do CI (primeira rodada real)
+
+O primeiro push da Fase 9 (`9c38255`) revelou uma falha real do job `server`
+que os gates locais no Windows não detectavam: dois testes de empacotamento
+assumiam `os.pathsep == ";"` (Windows), enquanto no runner Ubuntu o separador é
+`:`, quebrando as asserções de `--add-data`. O fix (testes agnósticos a
+`os.pathsep`) foi publicado em `d2680a7` e a segunda rodada concluiu
+**com sucesso**:
+
+| Job | Resultado | Tempo |
+|---|---|---|
+| Server gates (Linux) | ✓ | 20s |
+| Android gates (Linux) | ✓ | 2m55s |
+| Windows bundle + smoke | ✓ | 1m6s |
+
+Ações atualizadas para as versões atuais (`checkout@v7`, `setup-uv@v9`,
+`setup-java@v5`, `setup-gradle@v6`) para eliminar avisos de depreciação
+(Node 20 / setup-java v4).
+
 ## Como validar o CI
 
 Após o push desta fase, o workflow `gates` dispara automaticamente:
