@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AntiGravity Stream Deck - Configuração Host PC (V2)</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="theme-cyberpunk">
+  <div class="app-header">
+    <div class="logo">⚡ AntiGravity Deck V2</div>
+    
+    <!-- Seletor de Perfil Ativo -->
+    <div class="profile-selector">
+      <label for="select-profile">Perfil:</label>
+      <select id="select-profile"></select>
+      <button id="btn-new-profile" class="btn btn-secondary">+ Novo Perfil</button>
+    </div>
+
+    <!-- Seletor de Tema Visual -->
+    <div class="theme-selector">
+      <label for="select-theme">Tema UI:</label>
+      <select id="select-theme">
+        <option value="theme-cyberpunk">Cyberpunk Neon</option>
+        <option value="theme-oled">OLED Dark</option>
+        <option value="theme-glass">Glassmorphism</option>
+        <option value="theme-nordic">Nordic Slate</option>
+      </select>
+    </div>
+
+    <div class="server-status">
+      <span class="status-indicator"></span>
+      <span id="server-info">Carregando...</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Painel da Esquerda: Preview da Grade -->
+    <div class="panel grid-panel">
+      <div class="panel-header-row">
+        <h2>Matriz de Botões</h2>
+        <!-- NAVEGAÇÃO DE PÁGINAS -->
+        <div id="pages-bar" class="pages-bar"></div>
+      </div>
+
+      <div id="deck-grid" class="deck-grid">
+        <!-- Renderizado dinamicamente via JS -->
+      </div>
+      <div class="action-bar">
+        <button id="btn-save" class="btn btn-primary">💾 Salvar & Sincronizar</button>
+      </div>
+    </div>
+
+    <!-- Painel Central: Edição do Botão Selecionado -->
+    <div class="panel edit-panel">
+      <h2>Editor de Botão V2</h2>
+      <div id="editor-form" class="form-container">
+        <p class="placeholder-text">Clique em um botão da grade para editá-lo.</p>
+      </div>
+    </div>
+
+    <!-- Painel da Direita: Pareamento QR Code -->
+    <div class="panel qr-panel">
+      <h2>Conectar Celular</h2>
+      <div class="qr-container">
+        <img id="qr-code-img" src="" alt="QR Code de Pareamento">
+        <p id="qr-ip-text">IP: Buscando...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
