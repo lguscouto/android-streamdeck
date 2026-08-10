@@ -17,11 +17,16 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 
 ## Estado atual
 
-As **Fases 1, 2, 3, 4, 5, 6 e 7** estão implementadas no checkout atual.
+As **Fases 1, 2, 3, 4, 5, 6, 7, 8 e 9** estão implementadas no checkout atual.
 As Fases 1–4 entregam o painel, execução controlada, editor e gestão de
 perfis. A Fase 6 endurece a operação Windows; a Fase 7 adiciona HTTPS/WSS
 remoto, CA privada, bootstrap explícito de confiança, rotação/revogação de
-clientes e persistência Android protegida.
+clientes e persistência Android protegida. A Fase 8 torna a entrega verificável
+(bundle com schemas/fixtures, manifesto de release, assinatura externa
+fail-closed). A Fase 9 automatiza os gates em GitHub Actions (sem segredos),
+adiciona logs estruturados JSON, cap de payload, rate limit de handshake
+WebSocket e hardening Android (fonte única de metadados, backup seguro,
+edge-to-edge).
 
 ### Fase 1 — servidor e contratos
 
@@ -90,6 +95,33 @@ limites e comandos de validação.
 Consulte [`docs/phase-7-delivery.md`](docs/phase-7-delivery.md) para a
 configuração remota, bootstrap da CA e os gates reais da fase.
 
+### Fase 8 — release verificável
+
+- resolvedor único de recursos (`server/app/resources.py`) para fonte e bundle
+  PyInstaller; schemas e fixtures empacotados inteiros;
+- smoke do bundle com health, export e import reais no executável congelado;
+- manifesto/verificador determinístico (`server/scripts/release_manifest.py`);
+- assinatura Android externa fail-closed: sem keystore o APK release permanece
+  honestamente unsigned (`:app:printReleaseSigningStatus`), config parcial
+  aborta o build;
+- `android:allowBackup=false`, proteção de keystores/props no `.gitignore`;
+- `docs/phase-8-delivery.md` com instalação, reversão, hashes e limitações.
+
+### Fase 9 — CI sem segredos e hardening
+
+- CI GitHub Actions (`gates.yml`): jobs de servidor, Android e bundle Windows
+  sem secrets, com `RELEASE_SIGNING=unsigned` verificado;
+- logs estruturados JSON sem segredos (`server/app/logging_config.py`),
+  access-log sanitizado e eventos de segurança estáveis;
+- cap global de payload (1 MiB → `413 PAYLOAD_TOO_LARGE`) e rate limit de
+  handshake WebSocket por origem;
+- hardening Android: `BuildConfig` como fonte única de metadados,
+  `data_extraction_rules` (exclusão total), edge-to-edge (targetSdk 35) com
+  formulários roláveis, `proguard-rules.pro` para futuro R8.
+
+Consulte [`docs/phase-9-delivery.md`](docs/phase-9-delivery.md) para os gates
+da fase e as decisões registradas.
+
 ### Acesso local padrão
 
 - Health: `http://127.0.0.1:8765/health`
@@ -112,10 +144,15 @@ Validação atual do servidor:
 ```bash
 cd E:/projetos/android-streamdeck/server
 env -u PYTHONPATH -u VIRTUAL_ENV uv run pytest -q
+env -u PYTHONPATH -u VIRTUAL_ENV uv run ruff format --check .
 env -u PYTHONPATH -u VIRTUAL_ENV uv run ruff check .
 env -u PYTHONPATH -u VIRTUAL_ENV uv run python -m compileall -q app
 uv lock --check
 ```
+
+Os mesmos gates (mais Android unit/lint/assemble e smoke do bundle Windows)
+rodam automaticamente no GitHub Actions a cada push — ver
+[`.github/workflows/gates.yml`](.github/workflows/gates.yml).
 
 ## Estrutura
 

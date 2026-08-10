@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from app.windows_packaging import build_pyinstaller_command
+
+PATHSEP = os.pathsep
 
 
 def test_server_bundle_command_is_console_and_contains_fixture_data() -> None:
@@ -22,8 +25,8 @@ def test_server_bundle_command_is_console_and_contains_fixture_data() -> None:
     assert "--collect-all" in command
     assert "zeroconf" in command
     assert "E:/project/server/app/runner.py" in command
-    assert "E:/project/shared/fixtures;shared/fixtures" in command
-    assert "E:/project/shared/protocol;shared/protocol" in command
+    assert f"E:/project/shared/fixtures{PATHSEP}shared/fixtures" in command
+    assert f"E:/project/shared/protocol{PATHSEP}shared/protocol" in command
     assert "--distpath" in command
     assert "E:/project/server/dist" in command
     assert "--workpath" in command
@@ -38,8 +41,10 @@ def test_server_bundle_command_bundles_every_shared_fixture() -> None:
         output_dir=Path("E:/project/server/dist"),
         work_dir=Path("E:/project/server/build"),
     )
-    fixture_data = [arg for arg in command if arg.endswith(";shared/fixtures")]
-    protocol_data = [arg for arg in command if arg.endswith(";shared/protocol")]
+    fixture_data = [arg for arg in command if arg.endswith(f"{PATHSEP}shared/fixtures")]
+    protocol_data = [
+        arg for arg in command if arg.endswith(f"{PATHSEP}shared/protocol")
+    ]
 
     assert fixture_data
     assert protocol_data
