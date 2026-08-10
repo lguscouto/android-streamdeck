@@ -14,13 +14,91 @@ Padrões:
 
 - host: `127.0.0.1`
 - porta: `8765`
-- banco: `server/data/streamdeck.sqlite3`
+- banco no modo fonte: `server/data/streamdeck.sqlite3`; no bundle:
+  `%LOCALAPPDATA%\AndroidStreamDeck\streamdeck.sqlite3`
 - pareamento: desabilitado no modo loopback sem código configurado
 
 O endpoint de saúde padrão é `http://127.0.0.1:8765/health`.
 
 O arquivo `.env.example` é apenas documentação e não é carregado automaticamente.
 Não grave códigos de pareamento, tokens ou outras credenciais no repositório.
+
+## Operação no Windows — Fase 6
+
+### Tray opcional
+
+O tray não inicia automaticamente o servidor por padrão. Ele mostra o estado do
+processo que ele próprio controla e oferece `Iniciar servidor`, `Parar servidor`
+e `Sair`:
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync streamdeck-tray
+```
+
+O tray usa um comando fixo (`python -m app.runner` no modo fonte ou
+`streamdeck-server.exe` no bundle), sem `shell`, comandos fornecidos pelo usuário
+ou caminho executável livre. Ao sair, ele encerra somente o processo criado por
+ele.
+
+### Descoberta local opcional
+
+A descoberta mDNS/DNS-SD fica desativada por padrão. Para anunciar o servidor na
+rede local, é necessário configurar explicitamente um bind remoto autenticado:
+
+```text
+STREAMDECK_HOST=192.168.x.x
+STREAMDECK_PORT=8765
+STREAMDECK_PAIRING_CODE=<código fora do Git>
+STREAMDECK_DISCOVERY_ENABLED=true
+STREAMDECK_DISCOVERY_NAME=Android Stream Deck
+```
+
+O tipo anunciado é `_android-streamdeck._tcp.local.`. O anúncio contém apenas
+versão do protocolo, porta e `requires_pairing=true`; não contém código de
+pareamento, token, caminho, banco ou snapshot. O primeiro pareamento continua
+funcionando por endereço digitado manualmente, sem depender do mDNS. A
+configuração de descoberta é rejeitada em loopback, wildcard, hostname, IP público
+ou rede reservada; use somente um IPv4 RFC1918 concreto (`10/8`, `172.16/12` ou
+`192.168/16`).
+
+### Bundle Windows e smoke
+
+A partir de `server/`, com as dependências de desenvolvimento instaladas:
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --group dev python scripts/build_windows.py
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --group dev python scripts/smoke_windows_bundle.py
+```
+
+O build gera, fora do Git, `dist/streamdeck-server.exe` e
+`dist/streamdeck-tray.exe`. O smoke usa banco temporário, porta loopback efêmera,
+consulta `/health`, encerra o processo e verifica que a porta foi liberada.
+
+### Autostart reversível
+
+O script não é executado automaticamente. Em PowerShell, depois de escolher um
+bundle local confiável:
+
+```powershell
+.\scripts\windows-autostart.ps1 -Action Install -ExecutablePath 'C:\caminho\streamdeck-tray.exe'
+.\scripts\windows-autostart.ps1 -Action Remove
+```
+
+A tarefa usa o usuário interativo atual e `RunLevel Limited`; a remoção usa o
+nome fixo `Android Stream Deck Tray`.
+
+### Firewall restrito à rede privada
+
+A regra também é manual, exige PowerShell elevado e nunca é criada pelo servidor:
+
+```powershell
+.\scripts\windows-firewall.ps1 -Action Install -Port 8765
+.\scripts\windows-firewall.ps1 -Action Remove -Port 8765
+```
+
+A regra permite somente TCP na porta escolhida e no perfil `Private`. Não use o
+perfil `Public` e não exponha a porta à internet. O bind remoto continua exigindo
+código de pareamento e autenticação.
 
 ## Expor para o Android na rede local
 

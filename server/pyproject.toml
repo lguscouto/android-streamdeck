@@ -6,22 +6,30 @@ requires-python = ">=3.11,<3.15"
 dependencies = [
     "fastapi>=0.116,<1.0",
     "jsonschema>=4.23,<5.0",
+    "pillow>=11.0,<13.0",
+    "pystray>=0.19.5,<1.0",
     "referencing>=0.36,<1.0",
     "uvicorn[standard]>=0.35,<1.0",
+    "zeroconf>=0.136,<1.0",
 ]
 
 [project.scripts]
 streamdeck-server = "app.runner:main"
+streamdeck-tray = "app.tray:main"
 
 [dependency-groups]
 dev = [
     "httpx>=0.28,<1.0",
+    "pyinstaller>=6.13,<7.0",
     "pytest>=8.4,<9.0",
     "ruff>=0.12,<1.0",
 ]
 
 [tool.uv]
 package = true
+
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

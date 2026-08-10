@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,16 @@ from app.websocket import WebSocketManager, create_websocket_router
 
 SERVICE_NAME = "android-streamdeck-server"
 PROTOCOL_VERSION = "0.1"
-DEFAULT_PROFILE_PATH = (
-    Path(__file__).resolve().parents[2] / "shared" / "fixtures" / "default-profile.json"
-)
+
+
+def default_profile_path() -> Path:
+    """Locate the seed profile both from source and a PyInstaller bundle."""
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    root = Path(bundle_root) if bundle_root else Path(__file__).resolve().parents[2]
+    return root / "shared" / "fixtures" / "default-profile.json"
+
+
+DEFAULT_PROFILE_PATH = default_profile_path()
 
 
 class HealthResponse(BaseModel):
@@ -92,6 +100,3 @@ def create_app(
         )
 
     return application
-
-
-app = create_app()

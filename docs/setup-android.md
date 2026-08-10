@@ -234,3 +234,16 @@ portanto, permanece sem validação funcional ou visual.
 - Usar o ADB pelo caminho absoluto confirmado enquanto ele não for adicionado ao `PATH`: `C:\Users\gustavo\AppData\Local\Android\Sdk\platform-tools\adb.exe`.
 - Manter o servidor em `127.0.0.1:8765` durante o desenvolvimento local; para testar o Android em LAN/emulador, usar bind remoto somente com `STREAMDECK_PAIRING_CODE` e `STREAMDECK_REQUIRE_AUTH=auto`.
 - Não registrar modelo, API, tamanho ou densidade do A10 como se fossem conhecidos. Esses valores só podem ser preenchidos após uma consulta bem-sucedida ao dispositivo.
+
+## Operação LAN e descoberta — Fase 6
+
+A conexão manual por endpoint continua sendo o fluxo garantido: no emulador, use
+`http://10.0.2.2:8765`; em aparelho físico, use o IPv4 privado concreto do
+Windows. A descoberta mDNS do servidor é opt-in, não autentica o host e não
+substitui o primeiro pareamento manual.
+
+O manifesto de release mantém `usesCleartextTraffic=false`. Portanto, não altere
+o manifesto principal para tentar consumir automaticamente o anúncio mDNS via
+HTTP/WS. Isso só poderá existir em release com transporte TLS/WSS adequado. O
+modo debug permanece o único contexto em que cleartext local é aceitável para
+desenvolvimento controlado.

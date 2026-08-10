@@ -65,9 +65,13 @@ O Android envia o token somente no payload do `hello`, nunca na URL. Sessões se
 token ou com token inválido são fechadas antes da leitura do perfil. O aplicativo
 mantém o token criptografado com AES-GCM por chave do Android Keystore e só o usa
 para o endpoint normalizado que emitiu o pareamento. O MVP usa HTTP/WS em rede
-local confiável e não deve ser exposto à internet; TLS/mTLS, rotação administrativa
-e descoberta segura são hardening posterior. Nenhuma credencial deve ser
-armazenada no repositório.
+local confiável e não deve ser exposto à internet; TLS/mTLS e rotação administrativa
+são hardening posterior. A descoberta mDNS/DNS-SD é opt-in e apenas reduz a digitação
+do IP: ela exige autenticação e bind em IPv4 RFC1918 concreto, anuncia o serviço
+`_android-streamdeck._tcp.local.` sem token, código, caminho ou snapshot e não
+substitui o primeiro pareamento manual. O Android de release mantém cleartext
+bloqueado; a descoberta não é mecanismo de confiança nem libera HTTP em produção.
+Nenhuma credencial deve ser armazenada no repositório.
 
 ## Limite de segurança: sem shell command arbitrário
 
