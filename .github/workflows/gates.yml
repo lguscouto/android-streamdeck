@@ -30,7 +30,7 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v7
       - name: Sync locked dependencies
         run: uv sync --locked
       - name: Full test suite
@@ -93,7 +93,7 @@ jobs:
         working-directory: server
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v7
       - name: Sync locked dependencies
         run: uv sync --locked
       - name: Build PyInstaller bundle
