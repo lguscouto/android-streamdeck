@@ -155,11 +155,7 @@ class UrlAction(StrictModel):
             port = parsed.port
         except ValueError as exc:
             raise ValueError("url must be a valid HTTPS URL") from exc
-        if (
-            parsed.scheme != "https"
-            or not parsed.netloc
-            or parsed.hostname is None
-        ):
+        if parsed.scheme != "https" or not parsed.netloc or parsed.hostname is None:
             raise ValueError("url must be a valid HTTPS URL")
         if any(bracket in parsed.netloc for bracket in "[]"):
             raise ValueError("IPv6 hosts are not allowed in v1 URLs")
@@ -186,12 +182,7 @@ class ApplicationAction(StrictModel):
 
 
 Action: TypeAlias = Annotated[
-    HotkeyAction
-    | KeyAction
-    | MediaAction
-    | TextAction
-    | UrlAction
-    | ApplicationAction,
+    HotkeyAction | KeyAction | MediaAction | TextAction | UrlAction | ApplicationAction,
     Field(discriminator="type"),
 ]
 

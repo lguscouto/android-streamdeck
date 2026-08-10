@@ -227,7 +227,7 @@ def _emit_windows_text(text: str) -> None:
         raise ActionExecutionRejected("Text execution requires Windows")
     encoded_text = text.encode("utf-16-le", errors="surrogatepass")
     code_units = [
-        int.from_bytes(encoded_text[index:index + 2], byteorder="little")
+        int.from_bytes(encoded_text[index : index + 2], byteorder="little")
         for index in range(0, len(encoded_text), 2)
     ]
     inputs = (_Input * (len(code_units) * 2))()

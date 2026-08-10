@@ -34,11 +34,12 @@ data class PairingResult(
 )
 
 class PairingClient(
-    private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
-        .build(),
+    private var httpClient: OkHttpClient? = null,
 ) {
+    fun configureTlsTrust(tlsTrust: TlsTrust) {
+        httpClient = tlsTrust.newHttpClient()
+    }
+
     suspend fun claim(
         endpoint: ServerEndpoint,
         clientId: String,
@@ -53,7 +54,7 @@ class PairingClient(
             .url(endpoint.pairingUrl)
             .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        secureHttpClient().newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw safeApiException(body, "PAIRING_FAILED", "Pairing failed")
@@ -87,7 +88,7 @@ class PairingClient(
             .header("X-StreamDeck-Client-Id", clientId)
             .put(profileWire.toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        secureHttpClient().newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw safeApiException(body, "PROFILE_UPDATE_FAILED", "Profile update failed")
@@ -341,6 +342,12 @@ class PairingClient(
         fallback = "Profile import failed",
     )
 
+    private fun secureHttpClient(): OkHttpClient = httpClient
+        ?: throw PairingException(
+            "TLS_TRUST_REQUIRED",
+            "Private CA trust must be configured before connecting",
+        )
+
     private fun request(
         url: String,
         clientId: String,
@@ -369,7 +376,7 @@ class PairingClient(
 
     private suspend fun authenticatedRequest(request: Request, fallback: String): String =
         withContext(Dispatchers.IO) {
-            httpClient.newCall(request).execute().use { response ->
+            secureHttpClient().newCall(request).execute().use { response ->
                 val body = response.body?.string().orEmpty()
                 if (!response.isSuccessful) {
                     throw safeApiException(body, "HTTP_${response.code}", fallback)
@@ -444,11 +451,13 @@ interface StreamDeckSocketListener {
 }
 
 class StreamDeckWebSocketClient(
-    private val httpClient: OkHttpClient = OkHttpClient.Builder()
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .build(),
+    private var httpClient: OkHttpClient? = null,
     private val callbackHandler: Handler = Handler(Looper.getMainLooper()),
 ) {
+    fun configureTlsTrust(tlsTrust: TlsTrust) {
+        httpClient = tlsTrust.newHttpClient(readTimeoutSeconds = 0)
+    }
+
     fun connect(
         endpoint: ServerEndpoint,
         clientId: String,
@@ -459,7 +468,7 @@ class StreamDeckWebSocketClient(
         val request = Request.Builder()
             .url(endpoint.websocketUrl)
             .build()
-        return httpClient.newWebSocket(
+        return secureHttpClient().newWebSocket(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -498,6 +507,12 @@ class StreamDeckWebSocketClient(
             },
         )
     }
+
+    private fun secureHttpClient(): OkHttpClient = httpClient
+        ?: throw PairingException(
+            "TLS_TRUST_REQUIRED",
+            "Private CA trust must be configured before connecting",
+        )
 
     private fun dispatch(action: () -> Unit) {
         callbackHandler.post(action)

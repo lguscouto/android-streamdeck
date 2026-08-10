@@ -560,8 +560,10 @@ def test_direct_invalid_assignment_is_rejected_before_wire_serialization() -> No
 
 def test_wire_revalidation_rejects_model_copy_updated_shell_action() -> None:
     profile = Profile.model_validate(profile_with_single_button())
-    button = profile.pages[0].buttons[0].model_copy(
-        update={"action": {"type": "shell", "command": "not-allowed"}}
+    button = (
+        profile.pages[0]
+        .buttons[0]
+        .model_copy(update={"action": {"type": "shell", "command": "not-allowed"}})
     )
     page = profile.pages[0].model_copy(update={"buttons": [button]})
     profile = profile.model_copy(update={"pages": [page]})
@@ -649,9 +651,7 @@ def test_messages_round_trip_through_explicit_wire_api_without_nulls(
 
 def test_all_optional_fields_round_trip_through_explicit_wire_api() -> None:
     profile = profile_with_single_button()
-    profile["pages"][0]["buttons"][0].update(
-        {"icon": "save", "color": "#12345678"}
-    )
+    profile["pages"][0]["buttons"][0].update({"icon": "save", "color": "#12345678"})
 
     messages = [
         {

@@ -54,9 +54,7 @@ def build_pyinstaller_command(
         "--specpath",
         _portable_path(build_path),
         "--add-data",
-        (
-            f"{_portable_path(profile_fixture)}{os.pathsep}shared/fixtures"
-        ),
+        (f"{_portable_path(profile_fixture)}{os.pathsep}shared/fixtures"),
     ]
     if target == "server":
         command.extend(["--collect-all", "zeroconf"])

@@ -69,6 +69,7 @@ def test_fresh_database_bootstraps_latest_schema_and_is_idempotent(
             "actions",
             "profile_revisions",
             "paired_clients",
+            "paired_client_audit",
         }
 
 
@@ -97,6 +98,7 @@ def test_in_memory_database_stays_initialized_across_connections() -> None:
         "actions",
         "profile_revisions",
         "paired_clients",
+        "paired_client_audit",
     }
 
     profile = load_profile()

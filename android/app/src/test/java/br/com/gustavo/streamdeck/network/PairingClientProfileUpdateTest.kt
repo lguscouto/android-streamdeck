@@ -33,7 +33,7 @@ class PairingClientProfileUpdateTest {
         )
 
         val response = client.updateProfile(
-            endpoint = ServerEndpoint.parse("http://10.0.2.2:8765"),
+            endpoint = ServerEndpoint.parse("https://10.0.2.2:8765"),
             clientId = "android",
             accessToken = "opaque-token",
             profileId = "default",
@@ -54,7 +54,7 @@ class PairingClientProfileUpdateTest {
         val request = interceptor.request
         assertNotNull(request)
         assertEquals(
-            "http://10.0.2.2:8765/api/v1/profiles/default?expected_revision=1",
+            "https://10.0.2.2:8765/api/v1/profiles/default?expected_revision=1",
             request!!.url.toString(),
         )
         assertEquals("Bearer opaque-token", request.header("Authorization"))

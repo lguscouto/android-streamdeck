@@ -131,8 +131,8 @@ class ServerEndpoint private constructor(
             require(normalized.isNotEmpty()) { "server endpoint is empty" }
             val uri = runCatching { URI(normalized) }
                 .getOrElse { throw IllegalArgumentException("server endpoint is invalid", it) }
-            require(uri.scheme == "http" || uri.scheme == "https") {
-                "server endpoint must use http or https"
+            require(uri.scheme == "https") {
+                "server endpoint must use https"
             }
             require(uri.userInfo.isNullOrEmpty()) {
                 "server endpoint must not contain credentials"
@@ -155,7 +155,7 @@ class ServerEndpoint private constructor(
                 append("://")
                 append(uri.rawAuthority)
             }
-            val websocketScheme = if (uri.scheme == "https") "wss" else "ws"
+            val websocketScheme = "wss"
             return ServerEndpoint(
                 httpBaseUrl = base,
                 websocketUrl = "$websocketScheme://${uri.rawAuthority}/api/v1/ws",

@@ -13,6 +13,8 @@ DISCOVERY_INSTANCE_NAME = "Android Stream Deck"
 DISCOVERY_PROPERTIES = {
     b"protocol_version": b"0.1",
     b"requires_pairing": b"true",
+    b"transport": b"https",
+    b"tls": b"required",
 }
 _RFC1918_NETWORKS = (
     IPv4Network("10.0.0.0/8"),

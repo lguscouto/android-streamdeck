@@ -19,7 +19,7 @@ class FakePublisher:
 
 def test_runner_registers_and_unregisters_discovery_around_uvicorn(monkeypatch) -> None:
     events: list[str] = []
-    settings = SimpleNamespace(host="127.0.0.1", port=8765)
+    settings = SimpleNamespace(host="127.0.0.1", port=8765, tls_required=False)
     publisher = FakePublisher(settings, events)
 
     monkeypatch.setattr(runner.Settings, "from_env", classmethod(lambda _cls: settings))
@@ -42,7 +42,7 @@ def test_runner_keeps_server_available_when_optional_discovery_fails(
     monkeypatch, caplog
 ) -> None:
     events: list[str] = []
-    settings = SimpleNamespace(host="192.168.1.20", port=8765)
+    settings = SimpleNamespace(host="127.0.0.1", port=8765, tls_required=False)
 
     class FailingPublisher:
         def __init__(self, _settings: object) -> None:
@@ -74,7 +74,7 @@ def test_runner_keeps_server_available_when_optional_discovery_fails(
 
 def test_runner_unregisters_discovery_when_uvicorn_fails(monkeypatch) -> None:
     events: list[str] = []
-    settings = SimpleNamespace(host="127.0.0.1", port=8765)
+    settings = SimpleNamespace(host="127.0.0.1", port=8765, tls_required=False)
     publisher = FakePublisher(settings, events)
 
     monkeypatch.setattr(runner.Settings, "from_env", classmethod(lambda _cls: settings))

@@ -46,6 +46,7 @@ MAX_CACHED_RESPONSES = 256
 class ClientSession:
     client_id: str
     profile_id: str
+    credential_generation: int | None = None
     responses: dict[str, str] = field(default_factory=dict)
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     ready: bool = False
@@ -253,6 +254,24 @@ async def _load_requested_profile(
     return profile
 
 
+async def _session_credential_is_active(
+    manager: WebSocketManager, session: ClientSession
+) -> bool:
+    if not manager.require_auth:
+        return True
+    pairing_service = manager.pairing_service
+    if pairing_service is None or session.credential_generation is None:
+        return False
+    try:
+        return await run_in_threadpool(
+            pairing_service.is_credential_generation_active,
+            session.client_id,
+            session.credential_generation,
+        )
+    except PairingError:
+        return False
+
+
 async def _handle_press(
     websocket: WebSocket,
     repository: ProfileRepository,
@@ -426,6 +445,7 @@ async def _serve_websocket(
             await websocket.close(code=1002)
             return
 
+        credential_generation: int | None = None
         if manager.require_auth:
             pairing_service = manager.pairing_service
             if pairing_service is None or hello.payload.access_token is None:
@@ -437,14 +457,14 @@ async def _serve_websocket(
                 await websocket.close(code=1008)
                 return
             try:
-                authenticated = await run_in_threadpool(
-                    pairing_service.authenticate,
+                credential_generation = await run_in_threadpool(
+                    pairing_service.active_credential_generation,
                     hello.payload.client_id,
                     hello.payload.access_token,
                 )
             except PairingError:
-                authenticated = False
-            if not authenticated:
+                credential_generation = None
+            if credential_generation is None:
                 await _send_error(
                     websocket,
                     "AUTH_INVALID",
@@ -487,6 +507,7 @@ async def _serve_websocket(
         session = ClientSession(
             client_id=hello.payload.client_id,
             profile_id=profile.id,
+            credential_generation=credential_generation,
         )
         try:
             await manager.register(websocket, session)
@@ -552,9 +573,19 @@ async def _serve_websocket(
                         protocol_version=1,
                         type="pong",
                         payload={"nonce": message.payload.nonce},
-                    ).to_wire_json()
+                    ).to_wire_json(),
                 )
             elif isinstance(message, PressMessage):
+                if not await _session_credential_is_active(manager, session):
+                    await _send_error(
+                        websocket,
+                        "AUTH_REVOKED",
+                        "WebSocket credential is no longer active",
+                        request_id=message.payload.request_id,
+                        session=session,
+                    )
+                    await websocket.close(code=1008)
+                    return
                 await _handle_press(
                     websocket,
                     repository,

@@ -125,9 +125,7 @@ def test_page_crud_revisions_orders_and_active_page_protection(tmp_path: Path) -
     assert renamed.revision == 3
     assert renamed.pages[1].title == "Secundária renomeada"
 
-    reordered = repository.reorder_page(
-        "default", "secondary", 0, expected_revision=3
-    )
+    reordered = repository.reorder_page("default", "secondary", 0, expected_revision=3)
     assert reordered.revision == 4
     assert [(item.id, item.order) for item in reordered.pages] == [
         ("secondary", 0),
@@ -168,9 +166,7 @@ def test_page_operations_reject_duplicate_ids_orders_and_positions(
         }
     )
     with pytest.raises(ValidationError):
-        repository.save_profile(
-            Profile.model_validate(invalid), expected_revision=1
-        )
+        repository.save_profile(Profile.model_validate(invalid), expected_revision=1)
 
     with pytest.raises(ProfileConflictError):
         repository.reorder_page("default", "main", 1, expected_revision=99)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 3
 _REQUIRED_TABLES = frozenset(
     {
         "profiles",
@@ -11,9 +11,43 @@ _REQUIRED_TABLES = frozenset(
         "actions",
         "profile_revisions",
         "paired_clients",
+        "paired_client_audit",
     }
 )
-_REQUIRED_TABLES_V1 = _REQUIRED_TABLES - {"paired_clients"}
+_REQUIRED_TABLES_V1 = _REQUIRED_TABLES - {"paired_clients", "paired_client_audit"}
+_REQUIRED_TABLES_V2 = _REQUIRED_TABLES - {"paired_client_audit"}
+_REQUIRED_COLUMNS_V2 = {
+    "paired_clients": frozenset(
+        {"client_id", "client_version", "token_hash", "paired_at", "last_seen_at"}
+    )
+}
+_REQUIRED_COLUMNS_V3 = {
+    "paired_clients": frozenset(
+        {
+            "client_id",
+            "client_version",
+            "platform",
+            "device_label",
+            "token_hash",
+            "credential_generation",
+            "paired_at",
+            "last_seen_at",
+            "revoked_at",
+            "revoked_reason",
+        }
+    ),
+    "paired_client_audit": frozenset(
+        {
+            "event_id",
+            "client_id",
+            "event_type",
+            "credential_generation",
+            "actor_kind",
+            "reason_code",
+            "occurred_at",
+        }
+    ),
+}
 
 
 class MigrationError(RuntimeError):
@@ -116,6 +150,59 @@ _SCHEMA_V2 = (
     "ON paired_clients(token_hash)",
 )
 
+_SCHEMA_V3_PAIRED_CLIENTS = """
+CREATE TABLE paired_clients_v3 (
+    client_id TEXT PRIMARY KEY,
+    client_version TEXT NOT NULL CHECK (length(client_version) BETWEEN 1 AND 64),
+    platform TEXT NOT NULL CHECK (platform = 'android'),
+    device_label TEXT CHECK (
+        device_label IS NULL OR length(device_label) BETWEEN 1 AND 64
+    ),
+    token_hash TEXT NOT NULL UNIQUE CHECK (length(token_hash) = 64),
+    credential_generation INTEGER NOT NULL CHECK (credential_generation >= 1),
+    paired_at TEXT NOT NULL,
+    last_seen_at TEXT,
+    revoked_at TEXT,
+    revoked_reason TEXT CHECK (
+        revoked_reason IS NULL OR revoked_reason IN (
+            'user_request', 'lost_device', 'security', 'replaced'
+        )
+    ),
+    CHECK (
+        (revoked_at IS NULL AND revoked_reason IS NULL)
+        OR (revoked_at IS NOT NULL AND revoked_reason IS NOT NULL)
+    )
+)
+"""
+
+_SCHEMA_V3_PAIRED_CLIENT_AUDIT = """
+CREATE TABLE paired_client_audit (
+    event_id INTEGER PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('paired', 'repaired', 'revoked', 'legacy_imported')
+    ),
+    credential_generation INTEGER NOT NULL CHECK (credential_generation >= 1),
+    actor_kind TEXT NOT NULL CHECK (
+        actor_kind IN ('pairing_code', 'local_owner', 'self', 'legacy')
+    ),
+    reason_code TEXT CHECK (
+        reason_code IS NULL OR reason_code IN (
+            'user_request', 'lost_device', 'security', 'replaced'
+        )
+    ),
+    occurred_at TEXT NOT NULL,
+    FOREIGN KEY (client_id) REFERENCES paired_clients(client_id)
+)
+"""
+
+_SCHEMA_V3_INDEXES = (
+    "CREATE INDEX ix_paired_clients_status_last_seen "
+    "ON paired_clients(revoked_at, last_seen_at DESC, client_id)",
+    "CREATE INDEX ix_paired_client_audit_lookup "
+    "ON paired_client_audit(client_id, occurred_at DESC, event_id DESC)",
+)
+
 
 def _foreign_keys_enabled(connection: sqlite3.Connection) -> bool:
     return connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
@@ -124,6 +211,7 @@ def _foreign_keys_enabled(connection: sqlite3.Connection) -> bool:
 def _schema_is_complete(
     connection: sqlite3.Connection,
     required_tables: frozenset[str] = _REQUIRED_TABLES,
+    required_columns: dict[str, frozenset[str]] | None = None,
 ) -> bool:
     tables = {
         row[0]
@@ -131,7 +219,50 @@ def _schema_is_complete(
             "SELECT name FROM sqlite_master WHERE type = 'table'"
         )
     }
-    return required_tables.issubset(tables)
+    if not required_tables.issubset(tables):
+        return False
+    if required_columns is None:
+        return True
+    return all(
+        columns.issubset(
+            {
+                row["name"]
+                for row in connection.execute(f"PRAGMA table_info({table_name})")
+            }
+        )
+        for table_name, columns in required_columns.items()
+    )
+
+
+def _migrate_v3(connection: sqlite3.Connection) -> None:
+    connection.execute(_SCHEMA_V3_PAIRED_CLIENTS)
+    connection.execute(
+        """
+        INSERT INTO paired_clients_v3(
+            client_id, client_version, platform, device_label, token_hash,
+            credential_generation, paired_at, last_seen_at, revoked_at, revoked_reason
+        )
+        SELECT
+            client_id, client_version, 'android', NULL, token_hash,
+            1, paired_at, last_seen_at, NULL, NULL
+        FROM paired_clients
+        """
+    )
+    connection.execute("DROP TABLE paired_clients")
+    connection.execute("ALTER TABLE paired_clients_v3 RENAME TO paired_clients")
+    connection.execute(_SCHEMA_V3_PAIRED_CLIENT_AUDIT)
+    connection.execute(
+        """
+        INSERT INTO paired_client_audit(
+            client_id, event_type, credential_generation, actor_kind,
+            reason_code, occurred_at
+        )
+        SELECT client_id, 'legacy_imported', 1, 'legacy', NULL, paired_at
+        FROM paired_clients
+        """
+    )
+    for statement in _SCHEMA_V3_INDEXES:
+        connection.execute(statement)
 
 
 def migrate(connection: sqlite3.Connection) -> None:
@@ -151,8 +282,12 @@ def migrate(connection: sqlite3.Connection) -> None:
         connection, _REQUIRED_TABLES_V1
     ):
         raise MigrationError("database schema is incomplete")
+    if current_version >= 2 and not _schema_is_complete(
+        connection, _REQUIRED_TABLES_V2, _REQUIRED_COLUMNS_V2
+    ):
+        raise MigrationError("database schema is incomplete")
     if current_version == LATEST_SCHEMA_VERSION:
-        if not _schema_is_complete(connection):
+        if not _schema_is_complete(connection, _REQUIRED_TABLES, _REQUIRED_COLUMNS_V3):
             raise MigrationError("database schema is incomplete")
         return
 
@@ -166,6 +301,9 @@ def migrate(connection: sqlite3.Connection) -> None:
             for statement in _SCHEMA_V2:
                 connection.execute(statement)
             connection.execute("PRAGMA user_version = 2")
+        if current_version < 3:
+            _migrate_v3(connection)
+            connection.execute("PRAGMA user_version = 3")
         connection.commit()
     except sqlite3.Error as exc:
         connection.rollback()

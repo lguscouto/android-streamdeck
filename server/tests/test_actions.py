@@ -37,7 +37,7 @@ def test_windows_key_adapter_emits_one_allowed_key_without_modifier() -> None:
 
     assert emitter.events == [
         (0x41, False),  # A down
-        (0x41, True),   # A up
+        (0x41, True),  # A up
     ]
 
 
@@ -49,7 +49,7 @@ def test_windows_media_adapter_emits_one_allowed_media_command() -> None:
 
     assert emitter.events == [
         (0xB3, False),  # Play/pause down
-        (0xB3, True),   # Play/pause up
+        (0xB3, True),  # Play/pause up
     ]
 
 
@@ -104,9 +104,9 @@ def test_windows_hotkey_adapter_emits_closed_modifier_and_key_sequence() -> None
         (0x11, False),  # Ctrl down
         (0x10, False),  # Shift down
         (0x53, False),  # S down
-        (0x53, True),   # S up
-        (0x10, True),   # Shift up
-        (0x11, True),   # Ctrl up
+        (0x53, True),  # S up
+        (0x10, True),  # Shift up
+        (0x11, True),  # Ctrl up
     ]
 
 
@@ -114,9 +114,7 @@ def test_action_registry_executes_only_hotkey_adapter() -> None:
     emitter = RecordingKeyEmitter()
     registry = ActionRegistry(hotkey_adapter=WindowsHotkeyAdapter(emit_key=emitter))
 
-    result = registry.execute(
-        HotkeyAction(type="hotkey", modifiers=["ctrl"], key="S")
-    )
+    result = registry.execute(HotkeyAction(type="hotkey", modifiers=["ctrl"], key="S"))
 
     assert result.status == "completed"
     assert result.message == "Action completed"

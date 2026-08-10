@@ -13,12 +13,26 @@ import org.junit.Test
 
 class PairingClientCrudTest {
     @Test
+    fun `recusa requisicao sem CA privada verificada`() = runBlocking {
+        val error = runCatching {
+            PairingClient().listProfiles(
+                ServerEndpoint.parse("https://127.0.0.1:1"),
+                "android",
+                "token",
+            )
+        }.exceptionOrNull()
+
+        assertTrue(error is PairingException)
+        assertEquals("TLS_TRUST_REQUIRED", (error as PairingException).code)
+    }
+
+    @Test
     fun `envia autenticacao e expected revision em todas as mutacoes e valida rotas`() = runBlocking {
         val recorder = RequestRecorder()
         val client = PairingClient(
             httpClient = OkHttpClient.Builder().addInterceptor(recorder).build(),
         )
-        val endpoint = ServerEndpoint.parse("http://10.0.2.2:8765/")
+        val endpoint = ServerEndpoint.parse("https://10.0.2.2:8765/")
         val json = "{}"
 
         client.listProfiles(endpoint, "android", "token")
@@ -42,20 +56,20 @@ class PairingClientCrudTest {
             assertTrue(request.url.queryParameter("expected_revision") != null)
         }
         assertEquals(
-            "http://10.0.2.2:8765/api/v1/profiles/default/pages/main/reorder?expected_revision=5",
+            "https://10.0.2.2:8765/api/v1/profiles/default/pages/main/reorder?expected_revision=5",
             recorder.requests[9].url.toString(),
         )
         assertEquals(
-            "http://10.0.2.2:8765/api/v1/profiles/default/pages/main?expected_revision=6&replacement_page_id=secondary",
+            "https://10.0.2.2:8765/api/v1/profiles/default/pages/main?expected_revision=6&replacement_page_id=secondary",
             recorder.requests[10].url.toString(),
         )
         assertEquals(
-            "http://10.0.2.2:8765/api/v1/profiles/default/export",
+            "https://10.0.2.2:8765/api/v1/profiles/default/export",
             recorder.requests[11].url.toString(),
         )
         assertEquals("GET", recorder.requests[11].method)
         assertEquals(
-            "http://10.0.2.2:8765/api/v1/profiles/import?expected_revision=7",
+            "https://10.0.2.2:8765/api/v1/profiles/import?expected_revision=7",
             recorder.requests[12].url.toString(),
         )
         assertEquals("POST", recorder.requests[12].method)
@@ -70,7 +84,7 @@ class PairingClientCrudTest {
         val client = PairingClient(
             httpClient = OkHttpClient.Builder().addInterceptor(recorder).build(),
         )
-        val endpoint = ServerEndpoint.parse("http://10.0.2.2:8765")
+        val endpoint = ServerEndpoint.parse("https://10.0.2.2:8765")
 
         val error = runCatching {
             client.renameProfile(endpoint, "android", "token", "default", 1, "Novo")

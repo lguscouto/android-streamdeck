@@ -177,9 +177,7 @@ class ProfileRepository:
             mutate=lambda wire: {**wire, "name": name},
         )
 
-    def activate_profile(
-        self, profile_id: str, *, expected_revision: int
-    ) -> Profile:
+    def activate_profile(self, profile_id: str, *, expected_revision: int) -> Profile:
         """Activate a profile and record a monotonic selection revision."""
         try:
             with self.database.transaction() as connection:
@@ -240,9 +238,7 @@ class ProfileRepository:
                         )
                     connection.execute("UPDATE profiles SET is_active = 0")
                     replacement_wire = replacement_row["profile"].to_wire()
-                    replacement_wire["revision"] = (
-                        int(replacement_row["revision"]) + 1
-                    )
+                    replacement_wire["revision"] = int(replacement_row["revision"]) + 1
                     replacement_profile = Profile.model_validate(replacement_wire)
                     _replace_profile(
                         connection,

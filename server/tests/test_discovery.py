@@ -171,6 +171,10 @@ def test_publisher_registers_only_safe_metadata_and_stops_idempotently() -> None
     assert captured["port"] == 8765
     assert captured["addresses"] == [IPv4Address("192.168.1.44").packed]
     assert captured["properties"] == DISCOVERY_PROPERTIES
+    assert captured["properties"][b"transport"] == b"https"
+    assert captured["properties"][b"tls"] == b"required"
+    assert b"fingerprint" not in captured["properties"]
+    assert b"trust_code" not in captured["properties"]
     assert "safe-test-code" not in repr(captured)
     assert client.close_calls == 1
     assert len(client.registrations) == 1

@@ -7,18 +7,44 @@ import org.junit.Test
 class PairingCredentialsTest {
     @Test
     fun `recusa credencial persistida sem identificador ou token`() {
-        assertNull(PairingCredentials.fromStored("http://server", null, "token"))
-        assertNull(PairingCredentials.fromStored("http://server", "android-1", null))
-        assertNull(PairingCredentials.fromStored("http://server", "   ", "token"))
-        assertNull(PairingCredentials.fromStored("http://server", "android-1", "   "))
+        assertNull(PairingCredentials.fromStored("https://server", null, "token"))
+        assertNull(PairingCredentials.fromStored("https://server", "android-1", null))
+        assertNull(PairingCredentials.fromStored("https://server", "   ", "token"))
+        assertNull(PairingCredentials.fromStored("https://server", "android-1", "   "))
+    }
+
+    @Test
+    fun `recusa credencial persistida sem CA e codigo de confianca`() {
+        assertNull(
+            PairingCredentials.fromStored(
+                serverBaseUrl = "https://10.0.2.2:8765",
+                clientId = "android-1",
+                accessToken = "token",
+                caCertificatePem = null,
+                trustCode = null,
+            ),
+        )
+    }
+
+    @Test
+    fun `recusa credencial persistida em HTTP para impedir downgrade`() {
+        assertNull(
+            PairingCredentials.fromStored(
+                "http://10.0.2.2:8765",
+                "android-1",
+                "token",
+            ),
+        )
     }
 
     @Test
     fun `normaliza identificador sem modificar token opaco`() {
         val credentials = PairingCredentials.fromStored(
-            serverBaseUrl = "http://10.0.2.2:8765",
+            serverBaseUrl = "https://10.0.2.2:8765",
             clientId = " android-1 ",
             accessToken = "opaque-token_123",
+            caCertificatePem = TestTlsFixture.CA_PEM,
+            trustCode = TestTlsFixture.TRUST_CODE,
         )
 
         requireNotNull(credentials)
@@ -29,14 +55,16 @@ class PairingCredentialsTest {
     @Test
     fun `vincula token ao endpoint que emitiu o pareamento`() {
         val credentials = PairingCredentials.fromStored(
-            serverBaseUrl = "http://10.0.2.2:8765",
+            serverBaseUrl = "https://10.0.2.2:8765",
             clientId = "android-1",
             accessToken = "opaque-token_123",
+            caCertificatePem = TestTlsFixture.CA_PEM,
+            trustCode = TestTlsFixture.TRUST_CODE,
         )
 
         requireNotNull(credentials)
-        assertEquals("http://10.0.2.2:8765", credentials.serverBaseUrl)
-        assertEquals(true, credentials.isFor("http://10.0.2.2:8765"))
-        assertEquals(false, credentials.isFor("http://192.168.1.10:8765"))
+        assertEquals("https://10.0.2.2:8765", credentials.serverBaseUrl)
+        assertEquals(true, credentials.isFor("https://10.0.2.2:8765"))
+        assertEquals(false, credentials.isFor("https://192.168.1.10:8765"))
     }
 }

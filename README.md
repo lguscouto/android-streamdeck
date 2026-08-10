@@ -17,9 +17,11 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 
 ## Estado atual
 
-As **Fases 1, 2, 3 e 4** estão implementadas e validadas no `Pixel_8`.
-A Fase 4 adiciona o editor de perfis, salvamento otimista, auditoria sanitizada
-e adaptadores Windows fechados adicionais.
+As **Fases 1, 2, 3, 4, 5, 6 e 7** estão implementadas no checkout atual.
+As Fases 1–4 entregam o painel, execução controlada, editor e gestão de
+perfis. A Fase 6 endurece a operação Windows; a Fase 7 adiciona HTTPS/WSS
+remoto, CA privada, bootstrap explícito de confiança, rotação/revogação de
+clientes e persistência Android protegida.
 
 ### Fase 1 — servidor e contratos
 
@@ -74,20 +76,36 @@ e adaptadores Windows fechados adicionais.
 Consulte [`docs/phase-4-delivery.md`](docs/phase-4-delivery.md) para os contratos,
 limites e comandos de validação.
 
+### Fase 7 — transporte LAN seguro
+
+- bind remoto exige autenticação e HTTPS/WSS, sem fallback claro;
+- CA privada persistente, leaf renovável, SANs explícitos e DACL Windows;
+- código de confiança fora de banda validado pelo Android antes do primeiro
+  request;
+- CA, token, endpoint e identidade Android cifrados no Android Keystore;
+- rotação/revogação de credenciais e invalidação de sessões WebSocket antigas;
+- discovery mDNS opt-in, sem segredos e sem autoridade de confiança;
+- smoke HTTPS e E2E Android↔Windows executáveis por scripts versionados.
+
+Consulte [`docs/phase-7-delivery.md`](docs/phase-7-delivery.md) para a
+configuração remota, bootstrap da CA e os gates reais da fase.
+
 ### Acesso local padrão
 
 - Health: `http://127.0.0.1:8765/health`
 - API: `http://127.0.0.1:8765/api/v1`
 - WebSocket: `ws://127.0.0.1:8765/api/v1/ws`
 
-O bind padrão é loopback. O pareamento e a autenticação do WebSocket estão
-implementados, inclusive no cliente Android. O token Android é criptografado com
-AES-GCM por chave não exportável no Android Keystore e permanece vinculado ao
-endpoint que o emitiu. A primeira hotkey só é emitida pelo adaptador Windows a
-partir de teclas virtuais permitidas; não há shell, comando livre ou caminho
-recebido do cliente. A grade Android e os estados de execução foram validados no
-`Pixel_8`; consulte [`docs/phase-3-delivery.md`](docs/phase-3-delivery.md) para
-o smoke controlado, comandos e limitações.
+O bind padrão é loopback. Para acesso remoto, use o perfil seguro com HTTPS/WSS:
+
+- health remoto: `https://<host>:8765/health`;
+- API remota: `https://<host>:8765/api/v1`;
+- WebSocket remoto: `wss://<host>:8765/api/v1/ws`.
+
+A CA pública e o código de confiança são entregues explicitamente ao Android;
+nenhum anúncio mDNS ou tentativa de conexão substitui essa confirmação. O
+servidor mantém o bind padrão de desenvolvimento em loopback, mas o APK Android
+não aceita HTTP/WS claro.
 
 Validação atual do servidor:
 
@@ -124,6 +142,5 @@ padrão é `server/data/streamdeck.sqlite3`, ignorado pelo Git. Consulte
 
 ## Próximas fases
 
-- Fase 5: descoberta segura, hardening de transporte (TLS/mTLS) e gestão de
-  dispositivos;
-- fases posteriores: empacotamento e release verificável.
+- empacotamento Windows e assinatura/distribuição de release;
+- validação física no Galaxy A10 quando o dispositivo estiver disponível.

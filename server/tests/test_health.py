@@ -26,6 +26,7 @@ def test_health_returns_only_sanitized_public_metadata(
     monkeypatch.setenv("STREAMDECK_HOST", "0.0.0.0")
     monkeypatch.setenv("STREAMDECK_PORT", "9876")
     monkeypatch.setenv("STREAMDECK_PAIRING_CODE", pairing_code)
+    monkeypatch.setenv("STREAMDECK_TLS_IDENTITIES", "deck.example.test")
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:secret@example.invalid/db")
     monkeypatch.setenv("STREAMDECK_TOKEN", "do-not-return-this-token")
 
@@ -59,6 +60,7 @@ def test_settings_read_host_and_port_from_environment(
     monkeypatch.setenv("STREAMDECK_HOST", "192.0.2.10")
     monkeypatch.setenv("STREAMDECK_PORT", "9000")
     monkeypatch.setenv("STREAMDECK_PAIRING_CODE", pairing_code)
+    monkeypatch.setenv("STREAMDECK_TLS_IDENTITIES", "deck.example.test")
 
     settings = Settings.from_env()
 

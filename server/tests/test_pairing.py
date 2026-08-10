@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.db import Database
 from app.main import create_app
+from app.pairing import PairingService
 from app.repositories.profiles import ProfileRepository
 
 FIXTURE_PATH = (
@@ -206,3 +207,140 @@ def test_migration_creates_pairing_table(tmp_path: Path) -> None:
         }
 
     assert "paired_clients" in tables
+
+
+def test_repairing_rotates_generation_and_writes_sanitized_audit(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "streamdeck.sqlite3")
+    database.initialize()
+    service = PairingService(database, "phase7-code")
+
+    first_token = service.claim_token("android-1", "0.1.0", "phase7-code")
+    second_token = service.claim_token("android-1", "0.1.1", "phase7-code")
+
+    with database.connect() as connection:
+        client = connection.execute(
+            """
+            SELECT client_version, platform, credential_generation,
+                   revoked_at, revoked_reason
+            FROM paired_clients
+            WHERE client_id = ?
+            """,
+            ("android-1",),
+        ).fetchone()
+        audit = connection.execute(
+            """
+            SELECT event_type, credential_generation, actor_kind, reason_code
+            FROM paired_client_audit
+            WHERE client_id = ?
+            ORDER BY event_id
+            """,
+            ("android-1",),
+        ).fetchall()
+
+    assert first_token != second_token
+    assert service.authenticate("android-1", first_token) is False
+    assert service.authenticate("android-1", second_token) is True
+    assert tuple(client) == ("0.1.1", "android", 2, None, None)
+    assert [tuple(row) for row in audit] == [
+        ("paired", 1, "pairing_code", None),
+        ("repaired", 2, "pairing_code", "replaced"),
+    ]
+
+
+def test_local_revoke_invalidates_token_once_and_preserves_audit(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "streamdeck.sqlite3")
+    database.initialize()
+    service = PairingService(database, "phase7-code")
+    token = service.claim_token("android-1", "0.1.0", "phase7-code")
+
+    assert service.revoke_client("android-1", "lost_device") is True
+    assert service.authenticate("android-1", token) is False
+    assert service.revoke_client("android-1", "lost_device") is False
+
+    with database.connect() as connection:
+        client = connection.execute(
+            """
+            SELECT credential_generation, revoked_at, revoked_reason
+            FROM paired_clients
+            WHERE client_id = ?
+            """,
+            ("android-1",),
+        ).fetchone()
+        audit = connection.execute(
+            """
+            SELECT event_type, credential_generation, actor_kind, reason_code
+            FROM paired_client_audit
+            WHERE client_id = ?
+            ORDER BY event_id
+            """,
+            ("android-1",),
+        ).fetchall()
+
+    assert client["credential_generation"] == 1
+    assert client["revoked_at"] is not None
+    assert client["revoked_reason"] == "lost_device"
+    assert [tuple(row) for row in audit] == [
+        ("paired", 1, "pairing_code", None),
+        ("revoked", 1, "local_owner", "lost_device"),
+    ]
+
+
+def test_revoked_websocket_session_cannot_execute_press(tmp_path: Path) -> None:
+    from app.actions import ActionExecutionResult
+
+    class RecordingActionExecutor:
+        def __init__(self) -> None:
+            self.actions: list[object] = []
+
+        def execute(self, action: object) -> ActionExecutionResult:
+            self.actions.append(action)
+            return ActionExecutionResult("completed", "Action completed")
+
+    pairing_code = "phase7-code"
+    action_executor = RecordingActionExecutor()
+    app = create_app(
+        Settings(
+            database_path=tmp_path / "streamdeck.sqlite3",
+            pairing_code=pairing_code,
+            require_auth=True,
+        ),
+        action_executor=action_executor,
+    )
+    token = request(
+        app,
+        "POST",
+        "/api/v1/pairing/claim",
+        json_body={
+            "client_id": "android-1",
+            "client_version": "0.1.0",
+            "pairing_code": pairing_code,
+        },
+    ).json()["access_token"]
+    press = {
+        "protocol_version": 1,
+        "type": "press",
+        "payload": {
+            "request_id": "revoked-press",
+            "profile_id": "default",
+            "page_id": "main",
+            "button_id": "save-shortcut",
+            "revision": 1,
+        },
+    }
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/v1/ws") as websocket:
+            websocket.send_json(hello_message(token=token))
+            websocket.receive_json()
+            websocket.receive_json()
+            assert app.state.pairing_service.revoke_client("android-1", "lost_device")
+            websocket.send_json(press)
+            response = websocket.receive_json()
+
+    assert response["type"] == "error"
+    assert response["payload"]["code"] == "AUTH_REVOKED"
+    assert action_executor.actions == []

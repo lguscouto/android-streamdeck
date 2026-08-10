@@ -130,6 +130,7 @@ def test_import_and_export_require_authentication_when_enabled(tmp_path: Path) -
             host="192.0.2.10",
             pairing_code="phase5-code",
             require_auth=True,
+            tls_identities=("deck.example.test",),
         )
     )
     payload = load_profile(profile_id="auth-import")
@@ -144,11 +145,15 @@ def test_import_and_export_require_authentication_when_enabled(tmp_path: Path) -
 
     assert export_response.status_code == 401
     assert import_response.status_code == 401
-    assert export_response.json() == import_response.json() == {
-        "code": "AUTH_REQUIRED",
-        "message": "Authentication required",
-        "retryable": False,
-    }
+    assert (
+        export_response.json()
+        == import_response.json()
+        == {
+            "code": "AUTH_REQUIRED",
+            "message": "Authentication required",
+            "retryable": False,
+        }
+    )
 
     headers = auth_headers(app)
     authenticated_export = request(
@@ -301,8 +306,11 @@ def test_import_persistence_succeeds_when_broadcast_fails(tmp_path: Path) -> Non
 
     assert response.status_code == 200
     assert response.json()["id"] == "broadcast-failure"
-    assert request(
-        app,
-        "GET",
-        "/api/v1/profiles/broadcast-failure/export",
-    ).status_code == 200
+    assert (
+        request(
+            app,
+            "GET",
+            "/api/v1/profiles/broadcast-failure/export",
+        ).status_code
+        == 200
+    )

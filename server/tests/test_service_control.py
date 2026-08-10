@@ -73,6 +73,9 @@ def test_controller_starts_once_with_sanitized_fixed_environment() -> None:
         require_auth=True,
         discovery_enabled=True,
         discovery_name="Desk Test",
+        tls_mode="required",
+        tls_state_dir=Path("C:/runtime/tls"),
+        tls_identities=("deck.example.test", "192.168.1.20"),
     )
     controller = ServerProcessController(
         settings,
@@ -98,6 +101,11 @@ def test_controller_starts_once_with_sanitized_fixed_environment() -> None:
     assert kwargs["env"]["STREAMDECK_REQUIRE_AUTH"] == "true"
     assert kwargs["env"]["STREAMDECK_DISCOVERY_ENABLED"] == "true"
     assert kwargs["env"]["STREAMDECK_DISCOVERY_NAME"] == "Desk Test"
+    assert kwargs["env"]["STREAMDECK_TLS_MODE"] == "required"
+    assert Path(kwargs["env"]["STREAMDECK_TLS_STATE_DIR"]) == Path("C:/runtime/tls")
+    assert kwargs["env"]["STREAMDECK_TLS_IDENTITIES"] == (
+        "deck.example.test,192.168.1.20"
+    )
 
 
 def test_controller_stop_is_idempotent_and_terminates_owned_process() -> None:

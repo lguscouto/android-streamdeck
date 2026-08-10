@@ -85,6 +85,7 @@ def create_app(
             active_websocket_manager,
             pairing_service,
             require_auth=runtime_settings.require_auth,
+            admin_code=runtime_settings.admin_code,
         )
     )
     application.include_router(

@@ -16,14 +16,17 @@ Padrões:
 - porta: `8765`
 - banco no modo fonte: `server/data/streamdeck.sqlite3`; no bundle:
   `%LOCALAPPDATA%\AndroidStreamDeck\streamdeck.sqlite3`
+- estado TLS no Windows: `%LOCALAPPDATA%\AndroidStreamDeck\tls`
 - pareamento: desabilitado no modo loopback sem código configurado
+- TLS: `auto`; loopback pode usar HTTP/WS no desenvolvimento controlado, mas
+  bind remoto é promovido para HTTPS/WSS obrigatoriamente
 
 O endpoint de saúde padrão é `http://127.0.0.1:8765/health`.
 
 O arquivo `.env.example` é apenas documentação e não é carregado automaticamente.
 Não grave códigos de pareamento, tokens ou outras credenciais no repositório.
 
-## Operação no Windows — Fase 6
+## Operação no Windows — Fases 6 e 7
 
 ### Tray opcional
 
@@ -54,12 +57,12 @@ STREAMDECK_DISCOVERY_NAME=Android Stream Deck
 ```
 
 O tipo anunciado é `_android-streamdeck._tcp.local.`. O anúncio contém apenas
-versão do protocolo, porta e `requires_pairing=true`; não contém código de
-pareamento, token, caminho, banco ou snapshot. O primeiro pareamento continua
-funcionando por endereço digitado manualmente, sem depender do mDNS. A
-configuração de descoberta é rejeitada em loopback, wildcard, hostname, IP público
-ou rede reservada; use somente um IPv4 RFC1918 concreto (`10/8`, `172.16/12` ou
-`192.168/16`).
+versão do protocolo, porta, `requires_pairing=true`, `transport=https` e
+`tls=required`; não contém código de pareamento, token, caminho, banco ou
+snapshot. O primeiro pareamento continua funcionando por endereço digitado
+manualmente, sem depender do mDNS. A configuração de descoberta é rejeitada em
+loopback, wildcard, hostname, IP público ou rede reservada; use somente um IPv4
+RFC1918 concreto (`10/8`, `172.16/12` ou `192.168/16`).
 
 ### Bundle Windows e smoke
 
@@ -102,29 +105,36 @@ código de pareamento e autenticação.
 
 ## Expor para o Android na rede local
 
-O bind remoto exige autenticação. Configure um código de pareamento fora do Git e
-inicie o servidor, por exemplo:
+O bind remoto exige autenticação e TLS. Configure um código de pareamento e as
+identidades SAN fora do Git. A CA privada/leaf são criadas em
+`%LOCALAPPDATA%\AndroidStreamDeck\tls` por padrão:
 
 ```bash
 export STREAMDECK_HOST=0.0.0.0
 export STREAMDECK_PORT=8765
 export STREAMDECK_PAIRING_CODE='COLOQUE_SEU_CODIGO_AQUI'
+export STREAMDECK_ADMIN_CODE='OUTRO_CODIGO_ADMINISTRATIVO_AQUI'
+export STREAMDECK_REQUIRE_AUTH=true
+export STREAMDECK_TLS_MODE=required
+export STREAMDECK_TLS_IDENTITIES='192.168.1.44'
 env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync streamdeck-server
 ```
 
 O código deve ter de 6 a 64 caracteres ASCII (`A-Z`, `a-z`, `0-9`, `.`, `_` ou
-`-`). Quando `STREAMDECK_PAIRING_CODE` existe, `STREAMDECK_REQUIRE_AUTH` assume
-`true` automaticamente. O servidor rejeita binds remotos sem autenticação.
+`-`). O servidor rejeita binds remotos sem autenticação ou TLS e o certificado
+deve conter cada hostname/IP que será usado pelo Android.
 
-Para o emulador Android padrão, use no aplicativo:
+Para o emulador Android padrão, o endpoint seguro é:
 
 ```text
-http://10.0.2.2:8765
+https://10.0.2.2:8765
 ```
 
-Em um celular físico, use o IP privado do Windows na rede local, por exemplo
-`http://192.168.x.x:8765`. O firewall do Windows deve permitir a porta somente
-na rede privada apropriada; essa regra ainda é uma etapa operacional manual.
+O certificado precisa conter `10.0.2.2` no SAN e a CA pública/código de confiança
+precisam ser informados explicitamente no aplicativo. Em um celular físico, use
+o IP privado do Windows, com o mesmo IP incluído em `STREAMDECK_TLS_IDENTITIES`.
+O firewall do Windows deve permitir a porta somente na rede privada apropriada;
+essa regra ainda é uma etapa operacional manual.
 
 ## Pareamento e autenticação
 
@@ -150,19 +160,29 @@ armazena criptografado com AES-GCM, por uma chave não exportável do Android
 Keystore, e o vincula ao endpoint que emitiu o pareamento. Um novo pareamento do
 mesmo `client_id` substitui o token anterior.
 
-O WebSocket autenticado é:
+O WebSocket autenticado remoto é:
 
 ```text
-ws://<host>:<porta>/api/v1/ws
+wss://<host>:<porta>/api/v1/ws
 ```
 
 O cliente envia o token dentro de `hello.payload.access_token`. Tokens ausentes
 ou inválidos são rejeitados antes de carregar o perfil. O token não deve ser
 colocado na URL, em logs ou em mensagens de diagnóstico.
 
-A comunicação desta fase usa HTTP/WS na rede local. Não exponha a porta à
-internet. TLS/mTLS e rotação administrativa de dispositivos pertencem ao
-hardening posterior.
+A CA pública e o código de confiança são bootstrapados fora de banda no Android;
+o mDNS não concede confiança. A comunicação HTTP/WS sem TLS fica restrita ao
+loopback de desenvolvimento controlado. Não exponha o modo cleartext à rede.
+
+A administração de dispositivos usa um código separado e explícito:
+
+- `GET /api/v1/devices` — inventário sanitizado;
+- `POST /api/v1/devices/<client_id>/revoke` com `{"reason": "lost_device"}` —
+  revogação idempotente.
+
+Envie o segredo somente no header `X-StreamDeck-Admin-Code`, sempre por
+loopback ou HTTPS. Sem `STREAMDECK_ADMIN_CODE`, os endpoints ficam indisponíveis.
+A resposta nunca contém token, hash de token, CA, IP ou modelo.
 
 ## API HTTP de perfil
 

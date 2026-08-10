@@ -26,11 +26,21 @@ class EncryptedPairingStore(context: Context) {
         val serverBaseUrl = decryptPreference(SERVER_BASE_URL_KEY)
         val clientId = decryptPreference(CLIENT_ID_KEY)
         val accessToken = decryptPreference(ACCESS_TOKEN_KEY)
-        return PairingCredentials.fromStored(serverBaseUrl, clientId, accessToken).also { credentials ->
+        val caCertificatePem = decryptPreference(CA_CERTIFICATE_PEM_KEY)
+        val trustCode = decryptPreference(TRUST_CODE_KEY)
+        return PairingCredentials.fromStored(
+            serverBaseUrl,
+            clientId,
+            accessToken,
+            caCertificatePem,
+            trustCode,
+        ).also { credentials ->
             if (credentials == null && (
                     preferences.contains(SERVER_BASE_URL_KEY) ||
                         preferences.contains(CLIENT_ID_KEY) ||
-                        preferences.contains(ACCESS_TOKEN_KEY)
+                        preferences.contains(ACCESS_TOKEN_KEY) ||
+                        preferences.contains(CA_CERTIFICATE_PEM_KEY) ||
+                        preferences.contains(TRUST_CODE_KEY)
                 )
             ) {
                 clear()
@@ -42,11 +52,15 @@ class EncryptedPairingStore(context: Context) {
         val encryptedServerBaseUrl = encrypt(credentials.serverBaseUrl)
         val encryptedClientId = encrypt(credentials.clientId)
         val encryptedToken = encrypt(credentials.accessToken)
+        val encryptedCaCertificatePem = encrypt(credentials.tlsTrust.caCertificatePem)
+        val encryptedTrustCode = encrypt(credentials.tlsTrust.trustCode)
         check(
             preferences.edit()
                 .putString(SERVER_BASE_URL_KEY, encryptedServerBaseUrl)
                 .putString(CLIENT_ID_KEY, encryptedClientId)
                 .putString(ACCESS_TOKEN_KEY, encryptedToken)
+                .putString(CA_CERTIFICATE_PEM_KEY, encryptedCaCertificatePem)
+                .putString(TRUST_CODE_KEY, encryptedTrustCode)
                 .commit(),
         ) { "Não foi possível persistir o pareamento" }
     }
@@ -56,6 +70,8 @@ class EncryptedPairingStore(context: Context) {
             .remove(SERVER_BASE_URL_KEY)
             .remove(CLIENT_ID_KEY)
             .remove(ACCESS_TOKEN_KEY)
+            .remove(CA_CERTIFICATE_PEM_KEY)
+            .remove(TRUST_CODE_KEY)
             .apply()
     }
 
@@ -119,6 +135,8 @@ class EncryptedPairingStore(context: Context) {
         const val SERVER_BASE_URL_KEY = "server_base_url"
         const val CLIENT_ID_KEY = "client_id"
         const val ACCESS_TOKEN_KEY = "access_token"
+        const val CA_CERTIFICATE_PEM_KEY = "ca_certificate_pem"
+        const val TRUST_CODE_KEY = "trust_code"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val KEY_ALIAS = "streamdeck.pairing.aes-gcm.v1"
         const val TRANSFORMATION = "AES/GCM/NoPadding"

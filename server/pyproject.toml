@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Minimal local FastAPI server for Android Stream Deck"
 requires-python = ">=3.11,<3.15"
 dependencies = [
+    "cryptography>=45,<47",
     "fastapi>=0.116,<1.0",
     "jsonschema>=4.23,<5.0",
     "pillow>=11.0,<13.0",

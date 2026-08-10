@@ -14,6 +14,7 @@ def test_runner_calls_main_when_executed_as_a_script(monkeypatch, tmp_path) -> N
     monkeypatch.setenv("STREAMDECK_REQUIRE_AUTH", "false")
     monkeypatch.setenv("STREAMDECK_DISCOVERY_ENABLED", "false")
     monkeypatch.delenv("STREAMDECK_PAIRING_CODE", raising=False)
+
     def fake_run(_application, **kwargs) -> None:
         calls.append(kwargs)
 

@@ -37,6 +37,7 @@ import br.com.gustavo.streamdeck.network.StreamDeckButton
 import br.com.gustavo.streamdeck.network.StreamDeckProfileSnapshot
 import br.com.gustavo.streamdeck.network.StreamDeckSocketListener
 import br.com.gustavo.streamdeck.network.StreamDeckWebSocketClient
+import br.com.gustavo.streamdeck.network.TlsTrust
 import br.com.gustavo.streamdeck.ui.ButtonExecutionState
 import br.com.gustavo.streamdeck.ui.ProfileEditorDraft
 import br.com.gustavo.streamdeck.ui.ProfileEditorScreen
@@ -84,9 +85,16 @@ private fun PairingScreen() {
     val actionNotConnected = stringResource(R.string.action_not_connected)
     val actionSendFailed = stringResource(R.string.action_send_failed)
     var serverAddress by remember {
-        mutableStateOf(storedCredentials?.serverBaseUrl ?: "http://10.0.2.2:8765")
+        mutableStateOf(storedCredentials?.serverBaseUrl.orEmpty())
     }
     var pairingCode by remember { mutableStateOf("") }
+    var caCertificatePem by remember {
+        mutableStateOf(storedCredentials?.tlsTrust?.caCertificatePem.orEmpty())
+    }
+    var trustCode by remember {
+        mutableStateOf(storedCredentials?.tlsTrust?.trustCode.orEmpty())
+    }
+    var tlsTrust by remember { mutableStateOf(storedCredentials?.tlsTrust) }
     var clientId by remember {
         mutableStateOf(storedCredentials?.clientId ?: "android-emulator")
     }
@@ -154,9 +162,21 @@ private fun PairingScreen() {
                     accessToken = null
                     pairedClientId = null
                     pairedServerBaseUrl = null
+                    tlsTrust = null
                     pairingStore.clear()
                     token = null
                 }
+                val activeTrust = tlsTrust ?: run {
+                    if (caCertificatePem.isBlank() || trustCode.isBlank()) {
+                        throw PairingException(
+                            "TLS_TRUST_REQUIRED",
+                            "Informe a CA PEM e o código de confiança exibido no Windows",
+                        )
+                    }
+                    TlsTrust.fromPem(caCertificatePem, trustCode).also { tlsTrust = it }
+                }
+                pairingClient.configureTlsTrust(activeTrust)
+                websocketClient.configureTlsTrust(activeTrust)
                 if (token.isNullOrBlank()) {
                     if (pairingCode.isBlank()) {
                         throw PairingException(
@@ -176,6 +196,8 @@ private fun PairingScreen() {
                         serverBaseUrl = endpoint.httpBaseUrl,
                         clientId = result.clientId,
                         accessToken = token,
+                        caCertificatePem = activeTrust.caCertificatePem,
+                        trustCode = activeTrust.trustCode,
                     )
                         ?: throw PairingException("INVALID_RESPONSE", "Credencial inválida")
                     pairingStore.save(credentials)
@@ -711,6 +733,9 @@ private fun PairingScreen() {
         accessToken = null
         pairedClientId = null
         pairedServerBaseUrl = null
+        tlsTrust = null
+        caCertificatePem = ""
+        trustCode = ""
         pairingStore.clear()
         status = ConnectionStatus.DISCONNECTED
         statusMessage = "Pareamento removido"
@@ -749,6 +774,7 @@ private fun PairingScreen() {
                     accessToken = null
                     pairedClientId = null
                     pairedServerBaseUrl = null
+                    tlsTrust = null
                     pairingStore.clear()
                 }
             },
@@ -759,11 +785,22 @@ private fun PairingScreen() {
                     accessToken = null
                     pairedClientId = null
                     pairedServerBaseUrl = null
+                    tlsTrust = null
                     pairingStore.clear()
                 }
             },
             pairingCode = pairingCode,
             onPairingCodeChange = { pairingCode = it },
+            caCertificatePem = caCertificatePem,
+            onCaCertificatePemChange = {
+                caCertificatePem = it
+                tlsTrust = null
+            },
+            trustCode = trustCode,
+            onTrustCodeChange = {
+                trustCode = it
+                tlsTrust = null
+            },
             onConnect = ::connect,
             onClearPairing = ::clearPairing,
             status = status,
@@ -837,6 +874,10 @@ private fun PairingForm(
     onClientIdChange: (String) -> Unit,
     pairingCode: String,
     onPairingCodeChange: (String) -> Unit,
+    caCertificatePem: String,
+    onCaCertificatePemChange: (String) -> Unit,
+    trustCode: String,
+    onTrustCodeChange: (String) -> Unit,
     onConnect: () -> Unit,
     onClearPairing: () -> Unit,
     status: ConnectionStatus,
@@ -874,10 +915,34 @@ private fun PairingForm(
             },
             singleLine = true,
         )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = caCertificatePem,
+            onValueChange = onCaCertificatePemChange,
+            label = { Text("CA privada (PEM)") },
+            supportingText = {
+                Text("Cole o certificado público entregue fora de banda pelo Windows")
+            },
+            minLines = 3,
+            maxLines = 5,
+        )
+        OutlinedTextField(
+            modifier = Modifier.fillMaxWidth(),
+            value = trustCode,
+            onValueChange = onTrustCodeChange,
+            label = { Text("Código de confiança") },
+            supportingText = {
+                Text("Confirme o código exibido no Windows antes de conectar")
+            },
+            singleLine = true,
+        )
         Button(
             modifier = Modifier.fillMaxWidth(),
             onClick = onConnect,
-            enabled = serverAddress.isNotBlank() && clientId.isNotBlank(),
+            enabled = serverAddress.isNotBlank() &&
+                clientId.isNotBlank() &&
+                caCertificatePem.isNotBlank() &&
+                trustCode.isNotBlank(),
         ) {
             Text(stringResource(R.string.pair_and_connect))
         }

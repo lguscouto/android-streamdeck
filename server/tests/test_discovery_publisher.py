@@ -87,6 +87,8 @@ def test_publisher_announces_only_private_ipv4_and_closed_metadata() -> None:
     assert service_kwargs["properties"] == {
         b"protocol_version": b"0.1",
         b"requires_pairing": b"true",
+        b"transport": b"https",
+        b"tls": b"required",
     }
     announcement = repr(service_kwargs)
     assert "pairing-secret" not in announcement

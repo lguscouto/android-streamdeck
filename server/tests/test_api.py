@@ -85,7 +85,9 @@ def test_settings_include_database_path_from_environment(
     monkeypatch.setenv("STREAMDECK_PORT", "9000")
     monkeypatch.setenv("STREAMDECK_DATABASE_PATH", "custom/streamdeck.sqlite3")
     monkeypatch.setenv("STREAMDECK_PAIRING_CODE", pairing_code)
+    monkeypatch.setenv("STREAMDECK_ADMIN_CODE", "admin-code")
     monkeypatch.setenv("STREAMDECK_REQUIRE_AUTH", "true")
+    monkeypatch.setenv("STREAMDECK_TLS_IDENTITIES", "deck.example.test")
 
     settings = Settings.from_env()
 
@@ -93,6 +95,7 @@ def test_settings_include_database_path_from_environment(
     assert settings.port == 9000
     assert settings.database_path == "custom/streamdeck.sqlite3"
     assert settings.pairing_code == pairing_code
+    assert settings.admin_code == "admin-code"
     assert settings.require_auth is True
 
 
@@ -228,9 +231,7 @@ def test_app_restart_keeps_user_edited_profile(tmp_path: Path) -> None:
 
     assert current.status_code == 200
     assert current.json()["revision"] == 2
-    assert current.json()["pages"][0]["buttons"][0]["title"] == (
-        "Atalho atualizado"
-    )
+    assert current.json()["pages"][0]["buttons"][0]["title"] == ("Atalho atualizado")
 
 
 def test_broadcast_failure_does_not_hide_committed_update(tmp_path: Path) -> None:
@@ -251,8 +252,7 @@ def test_broadcast_failure_does_not_hide_committed_update(tmp_path: Path) -> Non
     assert response.status_code == 200
     assert response.json()["revision"] == 2
     assert (
-        request(app, "GET", "/api/v1/profiles/default/snapshot").json()["revision"]
-        == 2
+        request(app, "GET", "/api/v1/profiles/default/snapshot").json()["revision"] == 2
     )
 
 
@@ -300,8 +300,7 @@ def test_put_saves_next_revision_and_broadcasts_change(tmp_path: Path) -> None:
     assert response.json()["revision"] == 2
     assert manager.calls == [("default", 2, "updated")]
     assert (
-        request(app, "GET", "/api/v1/profiles/default/snapshot").json()["revision"]
-        == 2
+        request(app, "GET", "/api/v1/profiles/default/snapshot").json()["revision"] == 2
     )
 
 
@@ -368,11 +367,15 @@ def test_put_rejects_extra_fields_and_shell_action(tmp_path: Path) -> None:
 
     assert extra_response.status_code == 422
     assert shell_response.status_code == 422
-    assert extra_response.json() == shell_response.json() == {
-        "code": "VALIDATION_ERROR",
-        "message": "Request validation failed",
-        "retryable": False,
-    }
+    assert (
+        extra_response.json()
+        == shell_response.json()
+        == {
+            "code": "VALIDATION_ERROR",
+            "message": "Request validation failed",
+            "retryable": False,
+        }
+    )
     assert "whoami" not in shell_response.text
     assert "command" not in shell_response.text.lower()
 
@@ -425,6 +428,7 @@ def test_put_requires_client_authentication_when_remote_auth_is_enabled(
             host="192.0.2.10",
             pairing_code="phase4-code",
             require_auth=True,
+            tls_identities=("deck.example.test",),
             database_path=tmp_path / "streamdeck.sqlite3",
         )
     )
@@ -447,6 +451,9 @@ def test_put_requires_client_authentication_when_remote_auth_is_enabled(
     )
     assert unauthenticated_read.status_code == 401
     assert unauthenticated_read.json() == unauthenticated.json()
+    unauthenticated_actions = request(app, "GET", "/api/v1/actions")
+    assert unauthenticated_actions.status_code == 401
+    assert unauthenticated_actions.json() == unauthenticated.json()
 
     claim = request(
         app,

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hmac
 import logging
 from collections.abc import Callable
-from typing import Annotated, Any, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
 from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
@@ -60,6 +61,10 @@ class PairingClaimRequest(StrictModel):
 class PairingClaimResponse(StrictModel):
     client_id: StableId
     access_token: AccessToken
+
+
+class DeviceRevocationRequest(StrictModel):
+    reason: Literal["user_request", "lost_device", "security", "replaced"]
 
 
 class ProfileSummary(StrictModel):
@@ -214,11 +219,35 @@ def _require_http_auth(
         raise APIError(401, "AUTH_REQUIRED", "Authentication required", False)
 
 
+def _require_device_admin(request: Request, admin_code: str | None) -> None:
+    if admin_code is None:
+        raise APIError(
+            503,
+            "DEVICE_ADMIN_UNAVAILABLE",
+            "Device administration unavailable",
+            True,
+        )
+    supplied = request.headers.get("x-streamdeck-admin-code", "")
+    if (
+        not supplied
+        or supplied != supplied.strip()
+        or any(character.isspace() for character in supplied)
+        or not hmac.compare_digest(supplied, admin_code)
+    ):
+        raise APIError(
+            401,
+            "DEVICE_ADMIN_REQUIRED",
+            "Device administration requires local owner authorization",
+            False,
+        )
+
+
 def create_router(
     repository: ProfileRepository,
     websocket_manager: Any = None,
     pairing_service: PairingService | None = None,
     require_auth: bool = False,
+    admin_code: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=API_PREFIX, tags=["profiles"])
 
@@ -535,7 +564,8 @@ def create_router(
         return JSONResponse(content=saved.to_wire())
 
     @router.get("/actions")
-    def get_action_catalog() -> JSONResponse:
+    def get_action_catalog(request: Request) -> JSONResponse:
+        _require_http_auth(request, pairing_service, required=require_auth)
         return JSONResponse(content=ACTION_CATALOG)
 
     @router.get("/profiles/{profile_id}/audit")
@@ -547,6 +577,41 @@ def create_router(
         _require_http_auth(request, pairing_service, required=require_auth)
         entries = _safe_call(repository.list_audit, profile_id, limit=limit)
         return JSONResponse(content={"profile_id": profile_id, "entries": entries})
+
+    @router.get("/devices")
+    def list_devices(request: Request) -> JSONResponse:
+        _require_device_admin(request, admin_code)
+        if pairing_service is None:
+            raise APIError(
+                503,
+                "DEVICE_ADMIN_UNAVAILABLE",
+                "Device administration unavailable",
+                True,
+            )
+        devices = _safe_call(pairing_service.list_clients)
+        return JSONResponse(content={"devices": devices})
+
+    @router.post("/devices/{client_id}/revoke")
+    def revoke_device(
+        request: Request,
+        client_id: StableId,
+        payload: DeviceRevocationRequest,
+    ) -> JSONResponse:
+        _require_device_admin(request, admin_code)
+        if pairing_service is None:
+            raise APIError(
+                503,
+                "DEVICE_ADMIN_UNAVAILABLE",
+                "Device administration unavailable",
+                True,
+            )
+        devices = _safe_call(pairing_service.list_clients)
+        if not any(device["client_id"] == client_id for device in devices):
+            raise APIError(404, "DEVICE_NOT_FOUND", "Device not found", False)
+        _safe_call(pairing_service.revoke_client, client_id, payload.reason)
+        updated = _safe_call(pairing_service.list_clients)
+        device = next(device for device in updated if device["client_id"] == client_id)
+        return JSONResponse(content={"device": device})
 
     @router.post("/pairing/claim")
     async def claim_pairing(payload: PairingClaimRequest) -> JSONResponse:

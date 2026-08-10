@@ -130,6 +130,11 @@ class ServerProcessController:
         environment["STREAMDECK_REQUIRE_AUTH"] = (
             "true" if self.settings.require_auth else "false"
         )
+        environment["STREAMDECK_TLS_MODE"] = self.settings.tls_mode
+        environment["STREAMDECK_TLS_STATE_DIR"] = str(self.settings.tls_state_dir)
+        environment["STREAMDECK_TLS_IDENTITIES"] = ",".join(
+            self.settings.tls_identities
+        )
         if self.settings.pairing_code is None:
             environment.pop("STREAMDECK_PAIRING_CODE", None)
         else:

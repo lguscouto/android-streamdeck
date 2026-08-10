@@ -1,6 +1,7 @@
 package br.com.gustavo.streamdeck.network
 
 import android.content.Context
+import android.util.Base64
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -23,19 +24,38 @@ class PairingFlowInstrumentedTest {
 
     @Test
     fun pairsSynchronizesAndReconnectsWithEncryptedToken() {
-        val pairingCode = InstrumentationRegistry.getArguments()
-            .getString("pairingCode")
+        val arguments = InstrumentationRegistry.getArguments()
+        val pairingCode = arguments.getString("pairingCode")?.takeIf { it.isNotBlank() }
+        val serverAddress = arguments.getString("serverAddress")?.takeIf { it.isNotBlank() }
+        val trustCode = arguments.getString("trustCode")?.takeIf { it.isNotBlank() }
+        val caCertificatePem = arguments.getString("caPemBase64")
             ?.takeIf { it.isNotBlank() }
-            ?: run {
-                assumeTrue("requires an explicit ephemeral pairing code", false)
-                return
+            ?.let { encoded ->
+                Base64.decode(encoded, Base64.DEFAULT)
+                    .decodeToString()
+                    .replace("\r", "")
+                    .replace("\n", "")
             }
+        assumeTrue(
+            "requires explicit HTTPS endpoint, private CA and pairing code",
+            pairingCode != null &&
+                serverAddress != null &&
+                trustCode != null &&
+                caCertificatePem != null,
+        )
+        requireNotNull(pairingCode)
+        requireNotNull(serverAddress)
+        requireNotNull(trustCode)
+        requireNotNull(caCertificatePem)
         val store = EncryptedPairingStore(context)
         store.clear()
 
         ActivityScenario.launch(MainActivity::class.java).use {
             val fields = waitForFields()
-            fields.last().setText(pairingCode)
+            fields[0].setText(serverAddress)
+            fields[2].setText(pairingCode)
+            fields[3].setText(caCertificatePem)
+            fields[4].setText(trustCode)
             device.findObject(By.text("Parear e conectar")).click()
             assertAuthenticatedProfile()
             assertActionFeedback()
@@ -48,9 +68,11 @@ class PairingFlowInstrumentedTest {
             "streamdeck_pairing",
             Context.MODE_PRIVATE,
         ).all.values.filterIsInstance<String>()
-        assertEquals(3, encryptedValues.size)
+        assertEquals(5, encryptedValues.size)
         assertTrue(encryptedValues.all { it.startsWith("v1:") })
         assertFalse(encryptedValues.any { it.contains(pairingCode) })
+        assertFalse(encryptedValues.any { it.contains(caCertificatePem) })
+        assertFalse(encryptedValues.any { it.contains(trustCode) })
 
         ActivityScenario.launch(MainActivity::class.java).use {
             assertTrue(device.wait(Until.hasObject(By.text("Parear e conectar")), TIMEOUT_MS))
@@ -85,12 +107,12 @@ class PairingFlowInstrumentedTest {
         assertTrue(device.wait(Until.hasObject(By.clazz("android.widget.EditText")), TIMEOUT_MS))
         repeat(20) {
             val fields = device.findObjects(By.clazz("android.widget.EditText"))
-            if (fields.size >= 3) {
+            if (fields.size >= 5) {
                 return fields
             }
             Thread.sleep(100)
         }
-        error("pairing form did not expose three text fields")
+        error("pairing form did not expose five text fields")
     }
 
     private fun assertAuthenticatedProfile(
