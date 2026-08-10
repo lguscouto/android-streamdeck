@@ -1,0 +1,101 @@
+{
+  "protocol_version": 1,
+  "id": "phase5-export",
+  "name": "Exportação da Fase 5",
+  "revision": 4,
+  "active_page_id": "main",
+  "pages": [
+    {
+      "id": "main",
+      "title": "Principal",
+      "order": 0,
+      "rows": 2,
+      "columns": 3,
+      "buttons": [
+        {
+          "id": "hotkey-save",
+          "row": 0,
+          "column": 0,
+          "title": "Salvar",
+          "icon": "save",
+          "color": "#4CAF50",
+          "action": {
+            "type": "hotkey",
+            "modifiers": ["ctrl", "shift"],
+            "key": "S"
+          }
+        },
+        {
+          "id": "media-play",
+          "row": 0,
+          "column": 1,
+          "title": "Reproduzir",
+          "action": {
+            "type": "media",
+            "command": "play_pause"
+          }
+        },
+        {
+          "id": "docs",
+          "row": 0,
+          "column": 2,
+          "title": "Documentação",
+          "action": {
+            "type": "url",
+            "url": "https://developer.android.com/"
+          }
+        },
+        {
+          "id": "paste-text",
+          "row": 1,
+          "column": 0,
+          "title": "Inserir texto",
+          "action": {
+            "type": "text",
+            "text": "Olá, Stream Deck!"
+          }
+        },
+        {
+          "id": "open-editor",
+          "row": 1,
+          "column": 1,
+          "title": "Abrir editor",
+          "action": {
+            "type": "application",
+            "app_id": "editor"
+          }
+        },
+        {
+          "id": "escape",
+          "row": 1,
+          "column": 2,
+          "title": "Escape",
+          "action": {
+            "type": "key",
+            "key": "ESC"
+          }
+        }
+      ]
+    },
+    {
+      "id": "secondary",
+      "title": "Secundária",
+      "order": 1,
+      "rows": 1,
+      "columns": 1,
+      "buttons": [
+        {
+          "id": "mute",
+          "row": 0,
+          "column": 0,
+          "title": "Silenciar",
+          "color": "#00000000",
+          "action": {
+            "type": "media",
+            "command": "mute"
+          }
+        }
+      ]
+    }
+  ]
+}

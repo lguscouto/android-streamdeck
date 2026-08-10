@@ -522,3 +522,189 @@ def test_profile_audit_missing_profile_is_sanitized(tmp_path: Path) -> None:
         "message": "Profile not found",
         "retryable": False,
     }
+
+
+def test_profile_crud_http_routes_are_revision_guarded_and_explicit(
+    tmp_path: Path,
+) -> None:
+    app = make_seeded_app(tmp_path)
+    created_payload = load_profile_payload(profile_id="work")
+
+    listed = request(app, "GET", "/api/v1/profiles")
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["profiles"]] == ["default"]
+
+    created = request(
+        app,
+        "POST",
+        "/api/v1/profiles",
+        json_body=created_payload,
+    )
+    assert created.status_code == 200
+    assert created.json()["id"] == "work"
+    assert created.json()["revision"] == 1
+
+    renamed = request(
+        app,
+        "PATCH",
+        "/api/v1/profiles/work?expected_revision=1",
+        json_body={"name": "Trabalho"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["name"] == "Trabalho"
+    assert renamed.json()["revision"] == 2
+
+    stale = request(
+        app,
+        "PATCH",
+        "/api/v1/profiles/work?expected_revision=1",
+        json_body={"name": "Não sobrescrever"},
+    )
+    assert stale.status_code == 409
+    assert stale.json() == {
+        "code": "PROFILE_REVISION_CONFLICT",
+        "message": "Profile revision conflict",
+        "retryable": True,
+    }
+
+    duplicated = request(
+        app,
+        "POST",
+        "/api/v1/profiles/work/duplicate?expected_revision=2",
+        json_body={"id": "copy", "name": "Cópia"},
+    )
+    assert duplicated.status_code == 200
+    assert duplicated.json()["id"] == "copy"
+    assert duplicated.json()["revision"] == 1
+
+    activated = request(
+        app,
+        "POST",
+        "/api/v1/profiles/copy/activate?expected_revision=1",
+    )
+    assert activated.status_code == 200
+    assert activated.json()["revision"] == 2
+    assert request(app, "GET", "/api/v1/profile").json()["id"] == "copy"
+
+    blocked = request(
+        app,
+        "DELETE",
+        "/api/v1/profiles/copy?expected_revision=2",
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "PROFILE_DELETE_PROTECTED"
+
+    deleted = request(
+        app,
+        "DELETE",
+        "/api/v1/profiles/copy?expected_revision=2&replacement_profile_id=work",
+    )
+    assert deleted.status_code == 200
+    assert deleted.json() == {
+        "deleted_profile_id": "copy",
+        "active_profile_id": "work",
+    }
+
+
+def test_page_crud_http_routes_validate_ids_orders_and_active_replacement(
+    tmp_path: Path,
+) -> None:
+    app = make_seeded_app(tmp_path)
+    new_page = {
+        "id": "secondary",
+        "title": "Secundária",
+        "order": 1,
+        "rows": 1,
+        "columns": 1,
+        "buttons": [
+            {
+                "id": "secondary-button",
+                "row": 0,
+                "column": 0,
+                "title": "Ação",
+                "action": {"type": "key", "key": "A"},
+            }
+        ],
+    }
+
+    created = request(
+        app,
+        "POST",
+        "/api/v1/profiles/default/pages?expected_revision=1",
+        json_body=new_page,
+    )
+    assert created.status_code == 200
+    assert created.json()["revision"] == 2
+
+    renamed = request(
+        app,
+        "PATCH",
+        "/api/v1/profiles/default/pages/secondary?expected_revision=2",
+        json_body={"title": "Secundária renomeada"},
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["revision"] == 3
+
+    reordered = request(
+        app,
+        "POST",
+        "/api/v1/profiles/default/pages/secondary/reorder?expected_revision=3",
+        json_body={"order": 0},
+    )
+    assert reordered.status_code == 200
+    assert [page["id"] for page in reordered.json()["pages"]] == [
+        "secondary",
+        "main",
+    ]
+
+    stale = request(
+        app,
+        "DELETE",
+        "/api/v1/profiles/default/pages/main?expected_revision=3",
+    )
+    assert stale.status_code == 409
+    assert stale.json()["code"] == "PROFILE_REVISION_CONFLICT"
+
+    blocked = request(
+        app,
+        "DELETE",
+        "/api/v1/profiles/default/pages/main?expected_revision=4",
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "PAGE_DELETE_PROTECTED"
+
+    deleted = request(
+        app,
+        "DELETE",
+        "/api/v1/profiles/default/pages/main?expected_revision=4&replacement_page_id=secondary",
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["active_page_id"] == "secondary"
+    assert deleted.json()["revision"] == 5
+
+
+def test_phase5_mutation_payloads_are_closed_and_sanitized(tmp_path: Path) -> None:
+    app = make_seeded_app(tmp_path)
+    extra = request(
+        app,
+        "PATCH",
+        "/api/v1/profiles/default?expected_revision=1",
+        json_body={"name": "Novo", "shell": "whoami"},
+    )
+    assert extra.status_code == 422
+    assert extra.json() == {
+        "code": "VALIDATION_ERROR",
+        "message": "Request validation failed",
+        "retryable": False,
+    }
+    assert "whoami" not in extra.text
+    assert "shell" not in extra.text.lower()
+
+    invalid_order = request(
+        app,
+        "POST",
+        "/api/v1/profiles/default/pages/main/reorder?expected_revision=1",
+        json_body={"order": -1},
+    )
+    assert invalid_order.status_code == 422
+    assert invalid_order.json()["code"] == "VALIDATION_ERROR"

@@ -8,10 +8,119 @@ class ServerEndpoint private constructor(
     val websocketUrl: String,
     val pairingUrl: String,
 ) {
-    fun profileUpdateUrl(profileId: String, expectedRevision: Int): String {
-        require(STABLE_ID.matches(profileId)) { "profile id is invalid" }
+    fun profilesUrl(): String = "$httpBaseUrl/api/v1/profiles"
+
+    fun profilesCreateUrl(expectedRevision: Int): String =
+        queryUrl(profilesUrl(), expectedRevision)
+
+    fun profileUrl(profileId: String): String {
+        requireProfileId(profileId)
+        return "$httpBaseUrl/api/v1/profiles/$profileId"
+    }
+
+    fun profileUpdateUrl(profileId: String, expectedRevision: Int): String =
+        profileMutationUrl(profileId, expectedRevision)
+
+    fun profileRenameUrl(profileId: String, expectedRevision: Int): String =
+        profileMutationUrl(profileId, expectedRevision)
+
+    fun profileDuplicateUrl(profileId: String, expectedRevision: Int): String =
+        queryUrl("${profilePath(profileId)}/duplicate", expectedRevision)
+
+    fun profileActivateUrl(profileId: String, expectedRevision: Int): String =
+        queryUrl("${profilePath(profileId)}/activate", expectedRevision)
+
+    fun profileDeleteUrl(
+        profileId: String,
+        expectedRevision: Int,
+        replacementProfileId: String? = null,
+    ): String = queryUrl(
+        path = profileUrl(profileId),
+        expectedRevision = expectedRevision,
+        extra = replacementProfileId?.let {
+            requireProfileId(it)
+            "replacement_profile_id=$it"
+        },
+    )
+
+    fun profilePagesUrl(profileId: String, expectedRevision: Int): String =
+        queryUrl("${profilePath(profileId)}/pages", expectedRevision)
+
+    fun pageUrl(profileId: String, pageId: String, expectedRevision: Int): String {
+        requireProfileId(profileId)
+        requirePageId(pageId)
+        return queryUrl(
+            path = "$httpBaseUrl/api/v1/profiles/$profileId/pages/$pageId",
+            expectedRevision = expectedRevision,
+        )
+    }
+
+    fun pageRenameUrl(profileId: String, pageId: String, expectedRevision: Int): String =
+        pageUrl(profileId, pageId, expectedRevision)
+
+    fun pageReorderUrl(profileId: String, pageId: String, expectedRevision: Int): String =
+        queryUrl("${pagePath(profileId, pageId)}/reorder", expectedRevision)
+
+    fun pageDeleteUrl(
+        profileId: String,
+        pageId: String,
+        expectedRevision: Int,
+        replacementPageId: String? = null,
+    ): String = queryUrl(
+        path = pagePath(profileId, pageId),
+        expectedRevision = expectedRevision,
+        extra = replacementPageId?.let {
+            requirePageId(it)
+            "replacement_page_id=$it"
+        },
+    )
+
+    /** Export/import use the validated profile resource JSON contract. */
+    fun profileExportUrl(profileId: String): String {
+        requireProfileId(profileId)
+        return "${profilePath(profileId)}/export"
+    }
+
+    fun profileImportUrl(expectedRevision: Int): String =
+        queryUrl("$httpBaseUrl/api/v1/profiles/import", expectedRevision)
+
+    fun profileImportUrl(profileId: String, expectedRevision: Int): String {
+        requireProfileId(profileId)
+        return profileImportUrl(expectedRevision)
+    }
+
+    private fun profileMutationUrl(profileId: String, expectedRevision: Int): String {
+        requireProfileId(profileId)
+        return queryUrl(profileUrl(profileId), expectedRevision)
+    }
+
+    private fun profilePath(profileId: String): String = profileUrl(profileId)
+
+    private fun pagePath(profileId: String, pageId: String): String {
+        requireProfileId(profileId)
+        requirePageId(pageId)
+        return "$httpBaseUrl/api/v1/profiles/$profileId/pages/$pageId"
+    }
+
+    private fun queryUrl(path: String, expectedRevision: Int, extra: String? = null): String {
         require(expectedRevision >= 1) { "profile revision must be positive" }
-        return "$httpBaseUrl/api/v1/profiles/$profileId?expected_revision=$expectedRevision"
+        return buildString {
+            append(path)
+            append("?expected_revision=")
+            append(expectedRevision)
+            if (!extra.isNullOrBlank()) {
+                append('&')
+                append(extra)
+            }
+        }
+    }
+
+    private fun requireProfileId(profileId: String) {
+        require(STABLE_ID.matches(profileId)) { "profile id is invalid" }
+    }
+
+    private fun requirePageId(pageId: String) {
+        require(STABLE_ID.matches(pageId)) { "page id is invalid" }
     }
 
     companion object {

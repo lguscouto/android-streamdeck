@@ -28,6 +28,7 @@ import br.com.gustavo.streamdeck.network.EncryptedPairingStore
 import br.com.gustavo.streamdeck.network.PairingClient
 import br.com.gustavo.streamdeck.network.PairingCredentials
 import br.com.gustavo.streamdeck.network.PairingException
+import br.com.gustavo.streamdeck.network.RemoteProfileSummary
 import br.com.gustavo.streamdeck.network.ProfileSnapshotParser
 import br.com.gustavo.streamdeck.network.ProfileSnapshotSerializer
 import br.com.gustavo.streamdeck.network.ProtocolMessages
@@ -39,6 +40,7 @@ import br.com.gustavo.streamdeck.network.StreamDeckWebSocketClient
 import br.com.gustavo.streamdeck.ui.ButtonExecutionState
 import br.com.gustavo.streamdeck.ui.ProfileEditorDraft
 import br.com.gustavo.streamdeck.ui.ProfileEditorScreen
+import br.com.gustavo.streamdeck.ui.ProfileManagementScreen
 import br.com.gustavo.streamdeck.ui.StreamDeckGrid
 import java.util.UUID
 import kotlinx.coroutines.launch
@@ -50,6 +52,12 @@ private enum class ConnectionStatus {
     CONNECTING,
     CONNECTED,
     ERROR,
+}
+
+private fun safeManagementMessage(error: Throwable): String = when (error) {
+    is PairingException -> error.message ?: "Operação recusada pelo servidor"
+    is IllegalArgumentException -> error.message ?: "Dados inválidos"
+    else -> "Não foi possível concluir a operação"
 }
 
 @Composable
@@ -96,6 +104,18 @@ private fun PairingScreen() {
     var editorDraft by remember { mutableStateOf<ProfileEditorDraft?>(null) }
     var savingProfile by remember { mutableStateOf(false) }
     var editorError by remember { mutableStateOf<String?>(null) }
+    var managingProfiles by remember { mutableStateOf(false) }
+    var managedProfiles by remember { mutableStateOf<List<RemoteProfileSummary>>(emptyList()) }
+    var managedSelectedId by remember { mutableStateOf<String?>(null) }
+    var managedSnapshot by remember { mutableStateOf<StreamDeckProfileSnapshot?>(null) }
+    var managementLoading by remember { mutableStateOf(false) }
+    var managementSuccess by remember { mutableStateOf<String?>(null) }
+    var managementError by remember { mutableStateOf<String?>(null) }
+    var managementConflictCode by remember { mutableStateOf<String?>(null) }
+    var managementConflictMessage by remember { mutableStateOf<String?>(null) }
+    var managementExportJson by remember { mutableStateOf("") }
+    var managementImportJson by remember { mutableStateOf("") }
+    var managementRetry by remember { mutableStateOf<(() -> Unit)?>(null) }
     var socket by remember { mutableStateOf<WebSocket?>(null) }
 
     val socketForEffect = socket
@@ -354,6 +374,337 @@ private fun PairingScreen() {
         }
     }
 
+    fun loadManagedProfiles(targetProfileId: String? = managedSelectedId) {
+        scope.launch {
+            managementLoading = true
+            managementError = null
+            managementConflictCode = null
+            managementConflictMessage = null
+            try {
+                val endpoint = ServerEndpoint.parse(serverAddress)
+                val token = accessToken
+                    ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
+                val authenticatedClientId = pairedClientId ?: clientId.trim()
+                val profiles = pairingClient.listProfiles(
+                    endpoint = endpoint,
+                    clientId = authenticatedClientId,
+                    accessToken = token,
+                )
+                managedProfiles = profiles
+                val selected = targetProfileId
+                    ?.takeIf { id -> profiles.any { it.profileId == id } }
+                    ?: managedSelectedId?.takeIf { id -> profiles.any { it.profileId == id } }
+                    ?: profiles.firstOrNull()?.profileId
+                managedSelectedId = selected
+                managedSnapshot = selected?.let { profileId ->
+                    ProfileSnapshotParser.parseWireProfile(
+                        pairingClient.getProfile(
+                            endpoint = endpoint,
+                            clientId = authenticatedClientId,
+                            accessToken = token,
+                            profileId = profileId,
+                        ),
+                    )
+                }
+                managedSnapshot?.let { loaded ->
+                    if (loaded.profileId == profileSnapshot?.profileId) {
+                        profileSnapshot = loaded
+                        editorDraft = ProfileEditorDraft.from(loaded)
+                    }
+                }
+            } catch (error: Exception) {
+                managementError = safeManagementMessage(error)
+            } finally {
+                managementLoading = false
+            }
+        }
+    }
+
+    fun openProfileManagement() {
+        managingProfiles = true
+        managementSuccess = null
+        managementError = null
+        managementExportJson = ""
+        managementImportJson = ""
+        loadManagedProfiles()
+    }
+
+    fun runManagementMutation(
+        profileId: String,
+        expectedRevision: Int,
+        operation: suspend (ServerEndpoint, String, String) -> String,
+    ) {
+        managementRetry = {
+            runManagementMutation(profileId, expectedRevision, operation)
+        }
+        scope.launch {
+            managementLoading = true
+            managementSuccess = null
+            managementError = null
+            managementConflictCode = null
+            managementConflictMessage = null
+            try {
+                val endpoint = ServerEndpoint.parse(serverAddress)
+                val token = accessToken
+                    ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
+                val authenticatedClientId = pairedClientId ?: clientId.trim()
+                val response = operation(endpoint, authenticatedClientId, token)
+                runCatching { ProfileSnapshotParser.parseWireProfile(response) }
+                    .onSuccess { updated ->
+                        managedSnapshot = updated
+                        if (updated.profileId == profileSnapshot?.profileId) {
+                            profileSnapshot = updated
+                            editorDraft = ProfileEditorDraft.from(updated)
+                        }
+                    }
+                managementSuccess = "Operação concluída na revisão retornada pelo servidor"
+                managementRetry = null
+                loadManagedProfiles(profileId)
+            } catch (error: Exception) {
+                if (error is PairingException && error.code in setOf(
+                        "PROFILE_REVISION_CONFLICT",
+                        "PROFILE_DELETE_PROTECTED",
+                        "PAGE_DELETE_PROTECTED",
+                    )
+                ) {
+                    managementConflictCode = error.code
+                    managementConflictMessage = error.message
+                } else {
+                    managementError = safeManagementMessage(error)
+                }
+            } finally {
+                managementLoading = false
+            }
+        }
+    }
+
+    fun selectedManagedProfile(): RemoteProfileSummary? = managedSelectedId?.let { selectedId ->
+        managedProfiles.singleOrNull { it.profileId == selectedId }
+    }
+
+    fun managedRevision(): Int = managedSnapshot?.revision
+        ?: selectedManagedProfile()?.revision
+        ?: throw IllegalArgumentException("Perfil selecionado não está carregado")
+
+    fun renameManagedProfile(name: String) {
+        val selected = selectedManagedProfile() ?: return
+        runManagementMutation(selected.profileId, managedRevision()) { endpoint, id, token ->
+            pairingClient.renameProfile(endpoint, id, token, selected.profileId, managedRevision(), name)
+        }
+    }
+
+    fun createManagedProfile(profileId: String, profileName: String) {
+        val template = managedSnapshot ?: return
+        runCatching {
+            val normalizedId = profileId.trim()
+            val normalizedName = profileName.trim()
+            require(normalizedId.isNotEmpty()) { "ID do perfil é obrigatório" }
+            require(normalizedName.isNotEmpty()) { "Nome do perfil é obrigatório" }
+            val pages = template.pages.map { page ->
+                page.copy(buttons = page.buttons.map { button ->
+                    button.copy(id = "$normalizedId-${button.id}")
+                })
+            }
+            template.copy(
+                profileId = normalizedId,
+                profileName = normalizedName,
+                revision = 1,
+                activePage = pages.single { it.id == template.activePage.id },
+                pages = pages,
+            )
+        }.onSuccess { newSnapshot ->
+            val wire = ProfileSnapshotSerializer.toWire(newSnapshot, revision = 1)
+            runManagementMutation(newSnapshot.profileId, 1) { endpoint, id, token ->
+                pairingClient.createProfile(endpoint, id, token, 1, wire)
+            }
+        }.onFailure { error -> managementError = safeManagementMessage(error) }
+    }
+
+    fun duplicateManagedProfile(newProfileId: String, newProfileName: String) {
+        val selected = selectedManagedProfile() ?: return
+        runManagementMutation(selected.profileId, managedRevision()) { endpoint, id, token ->
+            pairingClient.duplicateProfile(
+                endpoint,
+                id,
+                token,
+                selected.profileId,
+                managedRevision(),
+                newProfileId.trim(),
+                newProfileName.trim().ifEmpty { null },
+            )
+        }
+    }
+
+    fun activateManagedProfile() {
+        val selected = selectedManagedProfile() ?: return
+        runManagementMutation(selected.profileId, managedRevision()) { endpoint, id, token ->
+            pairingClient.activateProfile(endpoint, id, token, selected.profileId, managedRevision())
+        }
+    }
+
+    fun deleteManagedProfile(replacementProfileId: String?) {
+        val selected = selectedManagedProfile() ?: return
+        if (selected.isActive && replacementProfileId.isNullOrBlank()) {
+            managementError = "Informe explicitamente um perfil substituto para o perfil ativo"
+            return
+        }
+        runManagementMutation(selected.profileId, managedRevision()) { endpoint, id, token ->
+            pairingClient.deleteProfile(
+                endpoint,
+                id,
+                token,
+                selected.profileId,
+                managedRevision(),
+                replacementProfileId?.trim()?.ifEmpty { null },
+            )
+        }
+    }
+
+    fun createManagedPage(pageId: String, title: String, order: Int) {
+        val selected = selectedManagedProfile() ?: return
+        val current = managedSnapshot ?: return
+        runCatching {
+            val normalizedId = pageId.trim()
+            require(normalizedId.isNotEmpty()) { "ID da página é obrigatório" }
+            require(title.trim().isNotEmpty()) { "Título da página é obrigatório" }
+            require(order >= 0) { "A ordem deve ser não negativa" }
+            current.activePage.copy(
+                id = normalizedId,
+                title = title.trim(),
+                order = order,
+                buttons = current.activePage.buttons.map { button ->
+                    button.copy(id = "$normalizedId-${button.id}")
+                },
+            )
+        }.onSuccess { page ->
+            runManagementMutation(selected.profileId, current.revision) { endpoint, id, token ->
+                pairingClient.createPage(endpoint, id, token, selected.profileId, current.revision, page)
+            }
+        }.onFailure { error -> managementError = safeManagementMessage(error) }
+    }
+
+    fun renameManagedPage(pageId: String, title: String) {
+        val selected = selectedManagedProfile() ?: return
+        val current = managedSnapshot ?: return
+        runManagementMutation(selected.profileId, current.revision) { endpoint, id, token ->
+            pairingClient.renamePage(
+                endpoint,
+                id,
+                token,
+                selected.profileId,
+                pageId.trim(),
+                current.revision,
+                title,
+            )
+        }
+    }
+
+    fun reorderManagedPage(pageId: String, order: Int) {
+        val selected = selectedManagedProfile() ?: return
+        val current = managedSnapshot ?: return
+        runManagementMutation(selected.profileId, current.revision) { endpoint, id, token ->
+            pairingClient.reorderPage(
+                endpoint,
+                id,
+                token,
+                selected.profileId,
+                pageId.trim(),
+                current.revision,
+                order,
+            )
+        }
+    }
+
+    fun deleteManagedPage(pageId: String, replacementPageId: String?) {
+        val selected = selectedManagedProfile() ?: return
+        val current = managedSnapshot ?: return
+        if (pageId.trim() == current.activePage.id && replacementPageId.isNullOrBlank()) {
+            managementError = "Informe explicitamente uma página substituta para a página ativa"
+            return
+        }
+        runManagementMutation(selected.profileId, current.revision) { endpoint, id, token ->
+            pairingClient.deletePage(
+                endpoint,
+                id,
+                token,
+                selected.profileId,
+                pageId.trim(),
+                current.revision,
+                replacementPageId?.trim()?.ifEmpty { null },
+            )
+        }
+    }
+
+    fun exportManagedProfile() {
+        val selected = selectedManagedProfile() ?: return
+        scope.launch {
+            managementLoading = true
+            managementError = null
+            try {
+                val endpoint = ServerEndpoint.parse(serverAddress)
+                val token = accessToken
+                    ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
+                val authenticatedClientId = pairedClientId ?: clientId.trim()
+                managementExportJson = pairingClient.exportProfileJson(
+                    endpoint,
+                    authenticatedClientId,
+                    token,
+                    selected.profileId,
+                )
+                managementSuccess = "JSON exportado em memória"
+            } catch (error: Exception) {
+                managementError = safeManagementMessage(error)
+            } finally {
+                managementLoading = false
+            }
+        }
+    }
+
+    fun importManagedProfile() {
+        val selected = selectedManagedProfile() ?: return
+        val current = managedSnapshot ?: return
+        val imported = runCatching {
+            ProfileSnapshotParser.parseWireProfile(managementImportJson)
+        }.getOrElse { error ->
+            managementError = error.message ?: "JSON de perfil inválido"
+            return
+        }
+        if (imported.profileId != selected.profileId) {
+            managementError = "O ID do JSON deve ser o mesmo do perfil selecionado"
+            return
+        }
+        runManagementMutation(selected.profileId, current.revision) { endpoint, id, token ->
+            pairingClient.importProfileJson(
+                endpoint,
+                id,
+                token,
+                current.revision,
+                managementImportJson,
+            )
+        }
+    }
+
+    fun resolveManagementConflict(resolution: br.com.gustavo.streamdeck.ui.ConflictResolution) {
+        when (resolution) {
+            br.com.gustavo.streamdeck.ui.ConflictResolution.RETRY -> {
+                managementConflictCode = null
+                managementConflictMessage = null
+                managementRetry?.invoke()
+            }
+            br.com.gustavo.streamdeck.ui.ConflictResolution.RELOAD -> {
+                managementConflictCode = null
+                managementConflictMessage = null
+                managementRetry = null
+                loadManagedProfiles(managedSelectedId)
+            }
+            br.com.gustavo.streamdeck.ui.ConflictResolution.CANCEL -> {
+                managementConflictCode = null
+                managementConflictMessage = null
+                managementRetry = null
+            }
+        }
+    }
+
     fun clearPairing() {
         socket?.cancel()
         socket = null
@@ -368,6 +719,18 @@ private fun PairingScreen() {
         editorDraft = null
         savingProfile = false
         editorError = null
+        managingProfiles = false
+        managedProfiles = emptyList()
+        managedSelectedId = null
+        managedSnapshot = null
+        managementLoading = false
+        managementSuccess = null
+        managementError = null
+        managementConflictCode = null
+        managementConflictMessage = null
+        managementExportJson = ""
+        managementImportJson = ""
+        managementRetry = null
         buttonStates = emptyMap()
         pendingPresses = emptyMap()
     }
@@ -407,6 +770,41 @@ private fun PairingScreen() {
             statusMessage = statusMessage,
             revision = null,
         )
+    } else if (managingProfiles) {
+        ProfileManagementScreen(
+            profiles = managedProfiles,
+            selectedProfileId = managedSelectedId,
+            snapshot = managedSnapshot,
+            loading = managementLoading,
+            successMessage = managementSuccess,
+            errorMessage = managementError,
+            conflictCode = managementConflictCode,
+            conflictMessage = managementConflictMessage,
+            exportJson = managementExportJson,
+            importJson = managementImportJson,
+            onImportJsonChange = { managementImportJson = it },
+            onSelectProfile = { profileId ->
+                managedSelectedId = profileId
+                loadManagedProfiles(profileId)
+            },
+            onCreateProfile = ::createManagedProfile,
+            onRenameProfile = ::renameManagedProfile,
+            onDuplicateProfile = ::duplicateManagedProfile,
+            onActivateProfile = ::activateManagedProfile,
+            onDeleteProfile = ::deleteManagedProfile,
+            onCreatePage = ::createManagedPage,
+            onRenamePage = ::renameManagedPage,
+            onReorderPage = ::reorderManagedPage,
+            onDeletePage = ::deleteManagedPage,
+            onExport = ::exportManagedProfile,
+            onImport = ::importManagedProfile,
+            onConflictResolution = ::resolveManagementConflict,
+            onClose = {
+                managingProfiles = false
+                managementConflictCode = null
+                managementConflictMessage = null
+            },
+        )
     } else if (editingProfile && draft != null) {
         ProfileEditorScreen(
             snapshot = snapshot,
@@ -425,6 +823,7 @@ private fun PairingScreen() {
             buttonStates = buttonStates,
             onButtonPress = ::pressButton,
             onEditProfile = ::startEditing,
+            onManageProfiles = ::openProfileManagement,
             onClearPairing = ::clearPairing,
         )
     }
@@ -504,6 +903,7 @@ private fun ConnectedDeckScreen(
     buttonStates: Map<String, ButtonExecutionState>,
     onButtonPress: (StreamDeckButton) -> Unit,
     onEditProfile: () -> Unit,
+    onManageProfiles: () -> Unit,
     onClearPairing: () -> Unit,
 ) {
     Column(
@@ -535,6 +935,12 @@ private fun ConnectedDeckScreen(
             onClick = onEditProfile,
         ) {
             Text("Editar perfil")
+        }
+        OutlinedButton(
+            modifier = Modifier.fillMaxWidth(),
+            onClick = onManageProfiles,
+        ) {
+            Text("Gerenciar perfis e páginas")
         }
         OutlinedButton(
             modifier = Modifier.fillMaxWidth(),

@@ -1,0 +1,215 @@
+{
+  "fixture_version": 1,
+  "protocol_version": 1,
+  "descricao": "Casos de importação rejeitados pelo contrato de perfil v1.",
+  "cases": [
+    {
+      "id": "extra-field",
+      "reason": "Propriedades desconhecidas não são aceitas.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "extra-field",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "unexpected": true,
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "key", "key": "A"}
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-id",
+      "reason": "IDs não podem conter caminhos ou espaços.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "../escape",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "key", "key": "A"}
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-page-order",
+      "reason": "A ordem da página não pode ser negativa.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "bad-order",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": -1,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "key", "key": "A"}
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-button-position",
+      "reason": "A posição deve estar dentro da grade declarada.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "bad-position",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 1,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "key", "key": "A"}
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "invalid-revision",
+      "reason": "A revisão deve ser um inteiro positivo.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "bad-revision",
+        "name": "Perfil inválido",
+        "revision": 0,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "key", "key": "A"}
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "shell-action",
+      "reason": "Ação shell não pertence à allowlist do protocolo.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "bad-shell",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {"type": "shell", "command": "not-allowed"}
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "command-outside-media",
+      "reason": "command só é permitido para media e dentro do enum fechado.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "bad-command",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {
+                  "type": "application",
+                  "app_id": "editor",
+                  "command": "not-allowed"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

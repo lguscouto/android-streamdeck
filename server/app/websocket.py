@@ -122,9 +122,17 @@ class WebSocketManager:
         reason: str = "updated",
     ) -> None:
         async with self._broadcast_lock:
-            if revision <= self._last_broadcast_revision.get(profile_id, 0):
+            last_revision = self._last_broadcast_revision.get(profile_id, 0)
+            if reason != "deleted" and revision <= last_revision:
                 return
-            self._last_broadcast_revision[profile_id] = revision
+            # A deletion is a terminal event for this profile incarnation. It must
+            # be emitted even when the same revision was already announced, then
+            # clear the revision guard so a later explicit recreation at revision
+            # one is not mistaken for an older update.
+            if reason == "deleted":
+                self._last_broadcast_revision.pop(profile_id, None)
+            else:
+                self._last_broadcast_revision[profile_id] = revision
             message = ProfileChangedMessage(
                 protocol_version=1,
                 type="profile_changed",

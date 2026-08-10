@@ -1,0 +1,69 @@
+{
+  "fixture_version": 1,
+  "migration_id": "profile-v0-to-v1",
+  "source_protocol_version": 0,
+  "target_protocol_version": 1,
+  "description": "Fixtures versionadas para documentar a fronteira de migração futura; v0 não é importado pelo helper v1.",
+  "cases": [
+    {
+      "id": "legacy-v0",
+      "status": "rejected",
+      "reason": "protocol_version 0 exige um migrador explícito antes da importação v1.",
+      "profile": {
+        "protocol_version": 0,
+        "id": "legacy",
+        "name": "Perfil legado",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "legacy-button",
+                "row": 0,
+                "column": 0,
+                "title": "Legado",
+                "action": {"type": "key", "key": "A"}
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "target-v1",
+      "status": "accepted",
+      "reason": "Representação após migração para o contrato v1.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "migrated",
+        "name": "Perfil migrado",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "migrated-button",
+                "row": 0,
+                "column": 0,
+                "title": "Migrado",
+                "action": {"type": "key", "key": "A"}
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
