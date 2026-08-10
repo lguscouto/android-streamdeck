@@ -50,6 +50,7 @@ class ClientSession:
     responses: dict[str, str] = field(default_factory=dict)
     send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     ready: bool = False
+    invalidated: bool = False
     pending_messages: list[str] = field(default_factory=list)
 
 
@@ -59,6 +60,8 @@ async def _send_session_text(
     message: str,
 ) -> None:
     async with session.send_lock:
+        if session.invalidated:
+            return
         await websocket.send_text(message)
 
 
@@ -115,6 +118,44 @@ class WebSocketManager:
     async def unregister(self, websocket: WebSocket) -> None:
         self._sessions.pop(websocket, None)
 
+    async def invalidate_client_sessions(self, client_id: str) -> int:
+        """Close every authenticated session for a client immediately."""
+        targets = [
+            (websocket, session)
+            for websocket, session in tuple(self._sessions.items())
+            if session.client_id == client_id and not session.invalidated
+        ]
+
+        async def close_session(websocket: WebSocket, session: ClientSession) -> None:
+            async with session.send_lock:
+                session.invalidated = True
+                try:
+                    await asyncio.wait_for(
+                        websocket.send_text(
+                            _error_message(
+                                "AUTH_REVOKED",
+                                "WebSocket credential is no longer active",
+                            ).to_wire_json()
+                        ),
+                        timeout=self.send_timeout,
+                    )
+                except Exception:
+                    pass
+                try:
+                    await asyncio.wait_for(
+                        websocket.close(code=1008),
+                        timeout=self.send_timeout,
+                    )
+                except Exception:
+                    pass
+            await self.unregister(websocket)
+
+        await asyncio.gather(
+            *(close_session(websocket, session) for websocket, session in targets),
+            return_exceptions=True,
+        )
+        return len(targets)
+
     async def broadcast_profile_changed(
         self,
         profile_id: str,
@@ -146,7 +187,7 @@ class WebSocketManager:
             targets = [
                 (websocket, session)
                 for websocket, session in tuple(self._sessions.items())
-                if session.profile_id == profile_id
+                if session.profile_id == profile_id and not session.invalidated
             ]
             results = await asyncio.gather(
                 *(
@@ -169,6 +210,8 @@ class WebSocketManager:
         message: str,
     ) -> bool:
         async with session.send_lock:
+            if session.invalidated:
+                return False
             if not session.ready:
                 session.pending_messages.append(message)
                 return False
@@ -257,8 +300,8 @@ async def _load_requested_profile(
 async def _session_credential_is_active(
     manager: WebSocketManager, session: ClientSession
 ) -> bool:
-    if not manager.require_auth:
-        return True
+    if session.invalidated or not manager.require_auth:
+        return not session.invalidated
     pairing_service = manager.pairing_service
     if pairing_service is None or session.credential_generation is None:
         return False

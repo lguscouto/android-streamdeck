@@ -18,7 +18,10 @@ uso local controlado; qualquer bind remoto exige autenticação e TLS.
 - `HTTPS`/`WSS` obrigatório para bind remoto;
 - inventário mínimo de clientes pareados, geração de credencial, revogação,
   rotação por novo pareamento e auditoria sem segredos;
-- sessões WebSocket abertas são invalidadas após revogação ou reparing;
+- sessões WebSocket abertas são invalidadas imediatamente após revogação ou
+  reparing, com erro `AUTH_REVOKED` e fechamento `1008`;
+- tentativas inválidas de pareamento e administração são limitadas a cinco por
+  origem a cada 60 segundos, com resposta sanitizada `429`;
 - mDNS/DNS-SD opt-in e sem segredos. O anúncio informa somente protocolo,
   pareamento requerido, `transport=https` e `tls=required`.
 

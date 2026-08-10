@@ -84,7 +84,9 @@ bloqueado e só aceita HTTPS/WSS.
 O owner pode habilitar a administração de dispositivos com um
 `STREAMDECK_ADMIN_CODE` separado: o inventário sanitizado e a revogação
 idempotente não aceitam o código de pareamento. Sem esse valor, essas rotas ficam
-desabilitadas. Nenhuma credencial deve ser armazenada no repositório.
+desabilitadas. Tentativas inválidas de pareamento e administração são limitadas a
+cinco por origem a cada 60 segundos. Nenhuma credencial deve ser armazenada no
+repositório.
 
 ## Limite de segurança: sem shell command arbitrário
 

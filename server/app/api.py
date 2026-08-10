@@ -22,6 +22,7 @@ from app.profile_transfer import (
     export_profile_data,
     import_profile,
 )
+from app.rate_limit import AttemptRateLimiter
 from app.repositories.profiles import (
     ProfileConflictError,
     ProfileNotFoundError,
@@ -219,12 +220,28 @@ def _require_http_auth(
         raise APIError(401, "AUTH_REQUIRED", "Authentication required", False)
 
 
-def _require_device_admin(request: Request, admin_code: str | None) -> None:
+def _request_origin(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"
+
+
+def _require_device_admin(
+    request: Request,
+    admin_code: str | None,
+    limiter: AttemptRateLimiter,
+) -> None:
     if admin_code is None:
         raise APIError(
             503,
             "DEVICE_ADMIN_UNAVAILABLE",
             "Device administration unavailable",
+            True,
+        )
+    origin = _request_origin(request)
+    if not limiter.allow(origin):
+        raise APIError(
+            429,
+            "DEVICE_ADMIN_RATE_LIMITED",
+            "Too many device administration attempts",
             True,
         )
     supplied = request.headers.get("x-streamdeck-admin-code", "")
@@ -240,6 +257,25 @@ def _require_device_admin(request: Request, admin_code: str | None) -> None:
             "Device administration requires local owner authorization",
             False,
         )
+    limiter.reset(origin)
+
+
+async def _invalidate_client_sessions(
+    websocket_manager: Any,
+    client_id: str,
+) -> None:
+    if websocket_manager is None:
+        return
+    invalidator = getattr(websocket_manager, "invalidate_client_sessions", None)
+    if invalidator is None:
+        return
+    try:
+        await invalidator(client_id)
+    except Exception:
+        LOGGER.warning(
+            "websocket session invalidation failed for client %s",
+            client_id,
+        )
 
 
 def create_router(
@@ -250,6 +286,8 @@ def create_router(
     admin_code: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=API_PREFIX, tags=["profiles"])
+    pairing_attempt_limiter = AttemptRateLimiter()
+    device_admin_attempt_limiter = AttemptRateLimiter()
 
     async def broadcast_event(
         profile_id: str,
@@ -580,7 +618,7 @@ def create_router(
 
     @router.get("/devices")
     def list_devices(request: Request) -> JSONResponse:
-        _require_device_admin(request, admin_code)
+        _require_device_admin(request, admin_code, device_admin_attempt_limiter)
         if pairing_service is None:
             raise APIError(
                 503,
@@ -592,12 +630,12 @@ def create_router(
         return JSONResponse(content={"devices": devices})
 
     @router.post("/devices/{client_id}/revoke")
-    def revoke_device(
+    async def revoke_device(
         request: Request,
         client_id: StableId,
         payload: DeviceRevocationRequest,
     ) -> JSONResponse:
-        _require_device_admin(request, admin_code)
+        _require_device_admin(request, admin_code, device_admin_attempt_limiter)
         if pairing_service is None:
             raise APIError(
                 503,
@@ -609,17 +647,29 @@ def create_router(
         if not any(device["client_id"] == client_id for device in devices):
             raise APIError(404, "DEVICE_NOT_FOUND", "Device not found", False)
         _safe_call(pairing_service.revoke_client, client_id, payload.reason)
+        await _invalidate_client_sessions(websocket_manager, client_id)
         updated = _safe_call(pairing_service.list_clients)
         device = next(device for device in updated if device["client_id"] == client_id)
         return JSONResponse(content={"device": device})
 
     @router.post("/pairing/claim")
-    async def claim_pairing(payload: PairingClaimRequest) -> JSONResponse:
+    async def claim_pairing(
+        request: Request,
+        payload: PairingClaimRequest,
+    ) -> JSONResponse:
         if pairing_service is None:
             raise APIError(
                 503,
                 "PAIRING_UNAVAILABLE",
                 "Pairing is unavailable",
+                True,
+            )
+        origin = _request_origin(request)
+        if not pairing_attempt_limiter.allow(origin):
+            raise APIError(
+                429,
+                "PAIRING_RATE_LIMITED",
+                "Too many pairing attempts",
                 True,
             )
         try:
@@ -645,6 +695,8 @@ def create_router(
             ) from None
         except Exception as exc:
             raise _internal_error() from exc
+        pairing_attempt_limiter.reset(origin)
+        await _invalidate_client_sessions(websocket_manager, payload.client_id)
         response = PairingClaimResponse(
             client_id=payload.client_id,
             access_token=token,

@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.config import Settings
 from app.main import create_app
@@ -160,6 +162,134 @@ def test_device_inventory_is_sanitized_and_revoke_is_idempotent(
         ).fetchone()
     assert row is not None
     assert token != row["token_hash"]
+
+
+def test_pairing_attempts_are_rate_limited_per_origin(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    responses = [
+        request(
+            app,
+            "POST",
+            "/api/v1/pairing/claim",
+            json_body={
+                "client_id": "android-1",
+                "client_version": "0.1.0",
+                "pairing_code": "wrong-code",
+            },
+        )
+        for _ in range(6)
+    ]
+
+    assert [response.status_code for response in responses] == [401] * 5 + [429]
+    assert responses[-1].json() == {
+        "code": "PAIRING_RATE_LIMITED",
+        "message": "Too many pairing attempts",
+        "retryable": True,
+    }
+
+
+def test_device_admin_attempts_are_rate_limited_per_origin(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    responses = [
+        request(
+            app,
+            "GET",
+            "/api/v1/devices",
+            headers={"x-streamdeck-admin-code": "wrong-code"},
+        )
+        for _ in range(6)
+    ]
+
+    assert [response.status_code for response in responses] == [401] * 5 + [429]
+    assert responses[-1].json() == {
+        "code": "DEVICE_ADMIN_RATE_LIMITED",
+        "message": "Too many device administration attempts",
+        "retryable": True,
+    }
+
+
+def test_admin_revoke_closes_authenticated_websocket_immediately(
+    tmp_path: Path,
+) -> None:
+    app = make_app(tmp_path)
+    token = claim(app)
+    hello = {
+        "protocol_version": 1,
+        "type": "hello",
+        "payload": {
+            "client_id": "android-1",
+            "client_version": "0.1.0",
+            "supported_protocol_versions": [1],
+            "access_token": token,
+        },
+    }
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/v1/ws") as websocket:
+            websocket.send_json(hello)
+            assert websocket.receive_json()["type"] == "welcome"
+            assert websocket.receive_json()["type"] == "profile_snapshot"
+
+            revoked = client.post(
+                "/api/v1/devices/android-1/revoke",
+                json={"reason": "security"},
+                headers=admin_headers(),
+            )
+            assert revoked.status_code == 200
+
+            error = websocket.receive_json()
+            assert error["payload"]["code"] == "AUTH_REVOKED"
+            try:
+                websocket.receive_text()
+            except WebSocketDisconnect as exc:
+                assert exc.code == 1008
+            else:
+                raise AssertionError("revoked websocket did not close immediately")
+
+    assert app.state.websocket_manager.connection_count == 0
+
+
+def test_repairing_closes_previous_websocket_immediately(tmp_path: Path) -> None:
+    app = make_app(tmp_path)
+    old_token = claim(app)
+    hello = {
+        "protocol_version": 1,
+        "type": "hello",
+        "payload": {
+            "client_id": "android-1",
+            "client_version": "0.1.0",
+            "supported_protocol_versions": [1],
+            "access_token": old_token,
+        },
+    }
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/v1/ws") as websocket:
+            websocket.send_json(hello)
+            websocket.receive_json()
+            websocket.receive_json()
+
+            repaired = client.post(
+                "/api/v1/pairing/claim",
+                json={
+                    "client_id": "android-1",
+                    "client_version": "0.1.0",
+                    "pairing_code": "pairing-code",
+                },
+            )
+            assert repaired.status_code == 200
+            assert repaired.json()["access_token"] != old_token
+
+            error = websocket.receive_json()
+            assert error["payload"]["code"] == "AUTH_REVOKED"
+            try:
+                websocket.receive_text()
+            except WebSocketDisconnect as exc:
+                assert exc.code == 1008
+            else:
+                raise AssertionError("repaired websocket did not close immediately")
+
+    assert app.state.websocket_manager.connection_count == 0
 
 
 def test_device_admin_is_unavailable_without_explicit_admin_code(

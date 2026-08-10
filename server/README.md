@@ -182,7 +182,10 @@ A administração de dispositivos usa um código separado e explícito:
 
 Envie o segredo somente no header `X-StreamDeck-Admin-Code`, sempre por
 loopback ou HTTPS. Sem `STREAMDECK_ADMIN_CODE`, os endpoints ficam indisponíveis.
-A resposta nunca contém token, hash de token, CA, IP ou modelo.
+A resposta nunca contém token, hash de token, CA, IP ou modelo. Tentativas
+inválidas de pareamento/administração são limitadas a cinco por origem por
+janela de 60 segundos e retornam `429` quando excedidas. Revogação e reparing
+fecham imediatamente as sessões WSS afetadas com `AUTH_REVOKED`/`1008`.
 
 ## API HTTP de perfil
 
