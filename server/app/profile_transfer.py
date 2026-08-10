@@ -12,14 +12,13 @@ from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import ValidationError
 from referencing import Registry, Resource
 
+from app.resources import protocol_dir
 from app.schemas import Profile
 
-PROFILE_SCHEMA_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "shared"
-    / "protocol"
-    / "v1-profile.schema.json"
-)
+
+def profile_schema_path() -> Path:
+    """Return the shared v1 profile schema, resolving source and bundle roots."""
+    return protocol_dir() / "v1-profile.schema.json"
 
 
 class ProfileTransferError(ValueError):
@@ -76,7 +75,7 @@ def _copy_mapping(payload: Mapping[str, Any]) -> dict[str, Any]:
 @lru_cache(maxsize=1)
 def _profile_schema_validator() -> Draft202012Validator:
     try:
-        schema = json.loads(PROFILE_SCHEMA_PATH.read_text(encoding="utf-8"))
+        schema = json.loads(profile_schema_path().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ProfileTransferError("profile schema is unavailable") from exc
 
@@ -192,7 +191,6 @@ class ProfileTransfer:
 
 
 __all__ = [
-    "PROFILE_SCHEMA_PATH",
     "ProfileRevisionError",
     "ProfileTransfer",
     "ProfileTransferError",
@@ -200,4 +198,5 @@ __all__ = [
     "export_profile_data",
     "export_profile_json",
     "import_profile",
+    "profile_schema_path",
 ]

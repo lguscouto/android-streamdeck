@@ -17,6 +17,18 @@ __pycache__/
 .env.*
 !.env.example
 
+# Android signing material and local build properties (release identity must never be tracked)
+*.jks
+*.keystore
+*.p12
+*.pfx
+local.properties
+keystore.properties
+signing.properties
+android/app/release-signing.properties
+**/release-signing.properties
+*_signing_config.properties
+
 # Local databases and runtime data
 *.db
 *.sqlite

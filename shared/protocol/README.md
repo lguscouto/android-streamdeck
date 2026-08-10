@@ -92,4 +92,4 @@ python3 -m json.tool shared/fixtures/default-profile.json >/dev/null
 python3 -m json.tool shared/fixtures/invalid-messages.json >/dev/null
 ```
 
-A validação relacional do perfil deve ficar no modelo Pydantic do servidor, além da validação JSON Schema. O repositório não adiciona `jsonschema` como dependência de runtime: um validador Draft 2020-12 pode ser escolhido pelo servidor quando essa camada for implementada.
+A validação relacional do perfil deve ficar no modelo Pydantic do servidor, além da validação JSON Schema. O servidor declara `jsonschema` como dependência de runtime (`server/pyproject.toml`) e usa um validador Draft 2020-12 em `server/app/profile_transfer.py`, registrando localmente os `$ref` para não tocar a rede.

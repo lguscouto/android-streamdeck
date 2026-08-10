@@ -34,9 +34,9 @@ def build_pyinstaller_command(
     project_root = Path(root)
     dist_path = Path(output_dir)
     build_path = Path(work_dir)
-    profile_fixture = (
-        project_root.parent / "shared" / "fixtures" / "default-profile.json"
-    )
+    shared_dir = project_root.parent / "shared"
+    protocol_dir = shared_dir / "protocol"
+    fixtures_dir = shared_dir / "fixtures"
     command = [
         executable,
         "-m",
@@ -54,7 +54,9 @@ def build_pyinstaller_command(
         "--specpath",
         _portable_path(build_path),
         "--add-data",
-        (f"{_portable_path(profile_fixture)}{os.pathsep}shared/fixtures"),
+        (f"{_portable_path(protocol_dir)}{os.pathsep}shared/protocol"),
+        "--add-data",
+        (f"{_portable_path(fixtures_dir)}{os.pathsep}shared/fixtures"),
     ]
     if target == "server":
         command.extend(["--collect-all", "zeroconf"])

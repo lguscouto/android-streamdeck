@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ from app.config import Settings
 from app.db import Database
 from app.pairing import PairingService
 from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
+from app.resources import fixtures_dir
 from app.schemas import Profile
 from app.websocket import WebSocketManager, create_websocket_router
 
@@ -23,9 +23,7 @@ PROTOCOL_VERSION = "0.1"
 
 def default_profile_path() -> Path:
     """Locate the seed profile both from source and a PyInstaller bundle."""
-    bundle_root = getattr(sys, "_MEIPASS", None)
-    root = Path(bundle_root) if bundle_root else Path(__file__).resolve().parents[2]
-    return root / "shared" / "fixtures" / "default-profile.json"
+    return fixtures_dir() / "default-profile.json"
 
 
 DEFAULT_PROFILE_PATH = default_profile_path()

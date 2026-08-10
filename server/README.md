@@ -74,8 +74,19 @@ env -u PYTHONPATH -u VIRTUAL_ENV uv run --group dev python scripts/smoke_windows
 ```
 
 O build gera, fora do Git, `dist/streamdeck-server.exe` e
-`dist/streamdeck-tray.exe`. O smoke usa banco temporário, porta loopback efêmera,
-consulta `/health`, encerra o processo e verifica que a porta foi liberada.
+`dist/streamdeck-tray.exe`, empacotando `shared/protocol` e `shared/fixtures`
+(schemas e fixtures públicos; banco, CA, chaves, tokens, logs e configurações
+mutáveis permanecem em `%LOCALAPPDATA%\AndroidStreamDeck` quando congelado). O
+smoke usa banco temporário e porta loopback efêmera, consulta `/health`, executa
+um export seguido de um import de perfil válido pelo executável congelado,
+encerra a árvore do processo e verifica porta liberada e remoção do diretório
+temporário.
+
+Manifesto de release determinístico:
+
+```bash
+env -u PYTHONPATH -u VIRTUAL_ENV uv run --group dev python -m scripts.release_manifest
+```
 
 ### Autostart reversível
 

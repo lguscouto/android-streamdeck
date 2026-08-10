@@ -142,5 +142,5 @@ padrão é `server/data/streamdeck.sqlite3`, ignorado pelo Git. Consulte
 
 ## Próximas fases
 
-- empacotamento Windows e assinatura/distribuição de release;
+- assinatura de identidade de distribuição (release APK/AAB) quando um keystore externo autorizado for fornecido;
 - validação física no Galaxy A10 quando o dispositivo estiver disponível.

@@ -1,7 +1,54 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+}
+
+// ---------------------------------------------------------------------------
+// External release signing (fail-closed). Credentials are read from an untracked
+// signing.properties (or STREAMDECK_* environment variables) and NEVER from Git.
+// A partial/absent config leaves the release APK unsigned and a dedicated task
+// reports/validates that state; the Android Debug keystore is never a substitute.
+// ---------------------------------------------------------------------------
+val signingProps = Properties()
+val signingFile = rootProject.file("release-signing.properties")
+val hasSigningFile = signingFile.isFile
+if (hasSigningFile) {
+    FileInputStream(signingFile).use { signingProps.load(it) }
+}
+
+fun outer(name: String): String = System.getenv(name) ?: ""
+
+fun signingValue(prop: String, env: String): String? {
+    val fromProps = signingProps.getProperty(prop)?.takeIf { it.isNotBlank() }
+    val fromEnv = outer(env).takeIf { it.isNotBlank() }
+    return fromProps ?: fromEnv
+}
+
+val signingStoreFile = signingValue("storeFile", "STREAMDECK_STORE_FILE")
+val signingStorePassword = signingValue("storePassword", "STREAMDECK_STORE_PASSWORD")
+val signingKeyAlias = signingValue("keyAlias", "STREAMDECK_KEY_ALIAS")
+val signingKeyPassword = signingValue("keyPassword", "STREAMDECK_KEY_PASSWORD")
+
+val signingFields = listOf(
+    signingStoreFile,
+    signingStorePassword,
+    signingKeyAlias,
+    signingKeyPassword,
+)
+val signingComplete = signingFields.all { !it.isNullOrBlank() }
+val signingPartial = signingFields.any { !it.isNullOrBlank() } && !signingComplete
+
+if (signingPartial) {
+    throw GradleException(
+        "release signing configuration is INCOMPLETE. Provide all of storeFile, " +
+            "storePassword, keyAlias, keyPassword in an untracked " +
+            "release-signing.properties (or STREAMDECK_* env vars), or remove the " +
+            "partial entry. Failing closed rather than shipping a misconfigured identity."
+    )
 }
 
 android {
@@ -22,6 +69,30 @@ android {
         }
     }
 
+    signingConfigs {
+        if (signingComplete) {
+            create("release") {
+                storeFile = file(signingStoreFile!!)
+                storePassword = signingStorePassword!!
+                keyAlias = signingKeyAlias!!
+                keyPassword = signingKeyPassword!!
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = false
+            if (signingComplete) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+    }
+
     buildFeatures {
         compose = true
     }
@@ -38,6 +109,17 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+tasks.register("printReleaseSigningStatus") {
+    doLast {
+        if (signingComplete) {
+            println("RELEASE_SIGNING=configured")
+        } else {
+            println("RELEASE_SIGNING=unsigned")
+            println("RELEASE_SIGNING_NOTE=No untracked release-signing.properties or STREAMDECK_* vars. The release APK is unsigned and NOT distributable as-is.")
         }
     }
 }
