@@ -12,6 +12,7 @@ from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = ROOT / "dist" / "streamdeck-server.exe"
+TRAY_ARTIFACT = ROOT / "dist" / "streamdeck-tray.exe"
 
 
 def _free_loopback_port() -> int:
@@ -98,6 +99,113 @@ def _stop_owned_process(process: subprocess.Popen[bytes]) -> None:
         process.wait(timeout=10.0)
 
 
+def _visible_window_titles_for_process(process_id: int) -> list[str]:
+    """Return visible top-level window titles owned by a Windows process."""
+    if os.name != "nt":
+        return []
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    enum_windows = user32.EnumWindows
+    enum_windows.argtypes = [callback_type, wintypes.LPARAM]
+    enum_windows.restype = wintypes.BOOL
+    get_window_thread_process_id = user32.GetWindowThreadProcessId
+    get_window_thread_process_id.argtypes = [
+        wintypes.HWND,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    get_window_thread_process_id.restype = wintypes.DWORD
+    is_window_visible = user32.IsWindowVisible
+    is_window_visible.argtypes = [wintypes.HWND]
+    is_window_visible.restype = wintypes.BOOL
+    get_window_text_length = user32.GetWindowTextLengthW
+    get_window_text_length.argtypes = [wintypes.HWND]
+    get_window_text_length.restype = ctypes.c_int
+    get_window_text = user32.GetWindowTextW
+    get_window_text.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+    get_window_text.restype = ctypes.c_int
+
+    titles: list[str] = []
+
+    @callback_type
+    def callback(hwnd: wintypes.HWND, _lparam: wintypes.LPARAM) -> bool:
+        if not is_window_visible(hwnd):
+            return True
+        owner = wintypes.DWORD()
+        get_window_thread_process_id(hwnd, ctypes.byref(owner))
+        if owner.value != process_id:
+            return True
+        length = get_window_text_length(hwnd)
+        if length <= 0:
+            return True
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        get_window_text(hwnd, buffer, length + 1)
+        titles.append(buffer.value)
+        return True
+
+    enum_windows(callback, 0)
+    return titles
+
+
+def _smoke_tray_bundle() -> None:
+    """Start the tray with a valid port and reject exception dialogs."""
+    if not TRAY_ARTIFACT.is_file():
+        raise FileNotFoundError(f"build artifact not found: {TRAY_ARTIFACT.name}")
+
+    port = _free_loopback_port()
+    with TemporaryDirectory(prefix="streamdeck-tray-smoke-") as runtime_dir:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "STREAMDECK_HOST": "127.0.0.1",
+                "STREAMDECK_PORT": str(port),
+                "STREAMDECK_DATABASE_PATH": str(
+                    Path(runtime_dir) / "streamdeck.sqlite3"
+                ),
+                "STREAMDECK_LOG_DIR": str(Path(runtime_dir) / "logs"),
+                "STREAMDECK_REQUIRE_AUTH": "false",
+                "STREAMDECK_DISCOVERY_ENABLED": "false",
+            }
+        )
+        environment.pop("STREAMDECK_PAIRING_CODE", None)
+        process = subprocess.Popen(
+            [str(TRAY_ARTIFACT)],
+            cwd=ROOT,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            shell=False,
+            close_fds=True,
+        )
+        try:
+            deadline = time.monotonic() + 5.0
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise RuntimeError(
+                        f"bundled tray exited before startup: {process.returncode}"
+                    )
+                exception_titles = [
+                    title
+                    for title in _visible_window_titles_for_process(process.pid)
+                    if "Unhandled exception in script" in title
+                ]
+                if exception_titles:
+                    raise RuntimeError(
+                        "bundled tray opened an unhandled-exception dialog: "
+                        + ", ".join(exception_titles)
+                    )
+                time.sleep(0.25)
+        finally:
+            _stop_owned_process(process)
+
+    if Path(runtime_dir).exists():
+        raise RuntimeError("bundled tray smoke left the temporary runtime directory")
+
+
 def main() -> None:
     if not ARTIFACT.is_file():
         raise FileNotFoundError(f"build artifact not found: {ARTIFACT.name}")
@@ -131,14 +239,17 @@ def main() -> None:
         try:
             health = _wait_for_health(port, process)
 
+            # Fresh databases install the built-in profile as the active profile;
+            # there is no legacy ``default`` row anymore.
+            builtin_profile_id = "essential-controls"
             status, exported = _http_json(
-                "GET", f"{base}/api/v1/profiles/default/export"
+                "GET", f"{base}/api/v1/profiles/{builtin_profile_id}/export"
             )
             if status != 200:
                 raise RuntimeError(
                     f"bundled export failed: status={status} body={exported}"
                 )
-            if exported.get("id") != "default":
+            if exported.get("id") != builtin_profile_id:
                 raise RuntimeError("bundled export returned unexpected profile id")
 
             # Import the exported wire payload as a fresh profile id at revision 1,
@@ -169,6 +280,8 @@ def main() -> None:
         "health={status}; export=ok; import=ok; port_released=true; "
         "temporary_state_removed=true".format(status=health["status"])
     )
+    _smoke_tray_bundle()
+    print("tray=ok; no_exception_dialog=true; temporary_state_removed=true")
 
 
 if __name__ == "__main__":

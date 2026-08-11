@@ -75,11 +75,25 @@ env -u PYTHONPATH -u VIRTUAL_ENV uv run --group dev python scripts/smoke_windows
 O build gera, fora do Git, `dist/streamdeck-server.exe` e
 `dist/streamdeck-tray.exe`, empacotando `shared/protocol` e `shared/fixtures`
 (schemas e fixtures públicos; banco, CA, chaves, tokens, logs e configurações
-mutáveis permanecem em `%LOCALAPPDATA%\AndroidStreamDeck` quando congelado). O
-smoke usa banco temporário e porta loopback efêmera, consulta `/health`, executa
+mutáveis permanecem em `%LOCALAPPDATA%\AndroidStreamDeck` quando congelado).
+O smoke usa banco temporário e porta loopback efêmera, consulta `/health`, executa
 um export seguido de um import de perfil válido pelo executável congelado,
 encerra a árvore do processo e verifica porta liberada e remoção do diretório
 temporário.
+
+Para usar um pacote já gerado em outro computador Windows x64, extraia a pasta
+`AndroidStreamDeck-Windows-x64` e execute `streamdeck-tray.exe`. No menu do ícone
+da bandeja, escolha `Iniciar servidor`; para configurar o pareamento, escolha
+`Parear dispositivo`. O computador de destino não precisa ter Python, uv ou o
+repositório instalado. O executável do servidor também pode ser iniciado
+diretamente para uso local em `127.0.0.1:8765`.
+
+O pacote é portátil, mas não é um instalador MSI: a pasta deve permanecer no
+local escolhido pelo usuário. O banco, certificados TLS e logs ficam fora da
+pasta do pacote, em `%LOCALAPPDATA%\AndroidStreamDeck`. Para uso pelo Android
+em uma rede local, o bind remoto, as identidades TLS e a regra de firewall
+privada continuam sendo configurados explicitamente; não exponha a porta em
+uma rede pública ou na internet.
 
 Manifesto de release determinístico:
 
