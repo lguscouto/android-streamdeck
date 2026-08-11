@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import copy
 import http.client
 import json
 import os
@@ -13,6 +14,9 @@ import tempfile
 import time
 from pathlib import Path
 
+from app.db import Database
+from app.repositories.profiles import ProfileRepository
+from app.schemas import Profile
 from app.tls import TlsMaterialStore
 
 TEST_CLASS = "br.com.gustavo.streamdeck.network.PairingFlowInstrumentedTest"
@@ -59,6 +63,26 @@ def _health(port: int, ca_certificate_path: Path) -> bool:
         connection.close()
 
 
+def _seed_visual_profile(database_path: Path, project_root: Path) -> None:
+    """Seed an isolated two-page profile without changing shared fixtures."""
+    fixture_path = project_root / "shared" / "fixtures" / "default-profile.json"
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    secondary = copy.deepcopy(payload["pages"][0])
+    secondary["id"] = "secondary"
+    secondary["title"] = "Secundária"
+    secondary["order"] = 1
+    for button in secondary["buttons"]:
+        button["id"] = f"secondary-{button['id']}"
+        button["title"] = f"Secundária · {button['title']}"
+    payload["pages"].append(secondary)
+    profile = Profile.model_validate(payload)
+    database = Database(database_path)
+    repository = ProfileRepository(database)
+    repository.initialize()
+    repository.seed_profile(profile)
+    database.close()
+
+
 def main() -> None:
     android_home = os.environ.get("ANDROID_HOME", "")
     adb = Path(android_home) / "platform-tools" / "adb.exe"
@@ -78,6 +102,8 @@ def main() -> None:
     with tempfile.TemporaryDirectory(prefix="streamdeck-phase7-android-") as raw_root:
         root = Path(raw_root)
         tls_state_dir = root / "tls"
+        database_path = root / "streamdeck.sqlite3"
+        _seed_visual_profile(database_path, project_root)
         material = TlsMaterialStore(
             tls_state_dir,
             ("10.0.2.2", "localhost"),
@@ -86,15 +112,21 @@ def main() -> None:
         environment = os.environ.copy()
         environment.update(
             {
-                "STREAMDECK_HOST": "0.0.0.0",
+                # nosec B104: intentional 0.0.0.0 bind so the Android emulator
+                # (10.0.2.2) can reach this disposable TLS test server.
+                "STREAMDECK_HOST": "0.0.0.0",  # nosec B104
                 "STREAMDECK_PORT": str(port),
-                "STREAMDECK_DATABASE_PATH": str(root / "streamdeck.sqlite3"),
+                "STREAMDECK_DATABASE_PATH": str(database_path),
                 "STREAMDECK_PAIRING_CODE": pairing_code,
                 "STREAMDECK_REQUIRE_AUTH": "true",
                 "STREAMDECK_TLS_MODE": "required",
                 "STREAMDECK_TLS_IDENTITIES": "10.0.2.2,localhost",
                 "STREAMDECK_TLS_STATE_DIR": str(tls_state_dir),
                 "STREAMDECK_DISCOVERY_ENABLED": "false",
+                # Generous idle timeout: UI automation on a JIT-warmed emulator
+                # can spend >60s between WebSocket messages, which the default
+                # would otherwise treat as a dead session.
+                "STREAMDECK_WEBSOCKET_IDLE_TIMEOUT": "300",
             }
         )
         server = subprocess.Popen(

@@ -34,8 +34,8 @@ jobs:
       - name: Sync locked dependencies
         run: uv sync --locked
       - name: Full test suite
-        # Baseline: 333 tests; 2 are skipped on non-Windows runners
-        # (tests/test_tls.py NTFS/ACL-only asserts).
+        # Current suite: 361 tests on Windows; 2 NTFS/ACL-specific tests may
+        # be skipped on non-Windows runners.
         run: uv run --no-sync pytest -q
       - name: Ruff format check
         run: uv run --no-sync ruff format --check .
@@ -43,6 +43,14 @@ jobs:
         run: uv run --no-sync ruff check .
       - name: Compile all Python
         run: uv run --no-sync python -m compileall -q app scripts
+      - name: Bandit security scan (medium+)
+        run: uv run --no-sync bandit -q -ll -r app scripts
+      - name: pip-audit dependency vulnerabilities
+        run: uv run --no-sync pip-audit
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Lockfile healthy
         run: uv lock --check
 

@@ -1,11 +1,108 @@
 # Changelog
 
 Todas as mudanças relevantes do Android Stream Deck são registradas aqui,
-agrupadas por fase funcional.
+grupadas por fase funcional.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o
 projeto adota [Versionamento Semântico](https://semver.org/lang/pt-BR/) para
 versões de produto; fases de desenvolvimento têm identificadores próprios.
+
+## [Redesign visual] — 2026-08-11 — Command Surface
+
+### Adicionado
+
+- Tema de produto Compose com paleta Command Surface, tema claro/escuro,
+  tokens de espaçamento/formas/tipografia e fonte Inter variável sob licença OFL.
+- Deck com top bar compacta, status em pill, menu contextual, ícones vetoriais,
+  contraste adaptativo, elevação, animação de pressão e estados de execução.
+- Pareamento reorganizado em cartões de conexão e segurança, com progresso,
+  estados de erro e seção avançada para CA PEM/código de confiança.
+- Editor visual com preview vivo, seleção de tecla, ícones, paleta de cores,
+  tipos de ação em menu e barra persistente de salvar/cancelar.
+- Gestão de perfis/páginas em cartões com hierarquia para ativo, revisão e IDs.
+- Importação por seletor nativo de arquivo JSON e exportação para arquivo,
+  mantendo o preview/editável em memória antes de aplicar.
+- Feedback tátil no pressionamento de comandos.
+
+### Corrigido
+
+- Declaração ausente de `ButtonExecutionState`, já referenciada pelo fluxo
+  principal, restaurada no pacote de UI.
+- Tema de navegação separado em `values-v27` para manter `minSdk 26` sem erro
+  de lint.
+
+### Validado
+
+- `:app:testDebugUnitTest`, `:app:assembleDebug`, `:app:assembleDebugAndroidTest` e
+  `:app:lintDebug` passaram; lint ficou em 0 erros e 10 warnings informativos.
+- APK debug: `22.346.043` bytes; APK de testes: `442.790` bytes.
+- Servidor: `361 passed, 1 warning`; Ruff, format, Bandit, pip-audit,
+  compileall e `uv lock --check` passaram.
+- E2E HTTPS/WSS real no `Pixel_8`: `android_https_wss_e2e=ok`,
+  `port_released=true`, `temporary_state_removed=true`.
+- Cinco screenshots PNG válidos, sem credenciais expostas, em `docs/visual/`
+  (`1080×2400`): pareamento, deck principal, página secundária, editor e
+  Settings.
+- Reconexão validada com token criptografado persistido; o código efêmero
+  continua obrigatório apenas no primeiro pareamento.
+
+### Concluído
+
+- Extração do shell para módulos por feature, Settings persistente, pager de
+  páginas baseado no snapshot, preview SAF com confirmações e testes
+  instrumentados/golden no emulador.
+
+### Limitações externas
+
+- Galaxy A10 ainda exige o aparelho físico.
+- APK release continua unsigned; a distribuição exige keystore de produção
+  externo.
+- Commit, push e CI remoto são confirmados no relatório de publicação desta
+  entrega.
+
+## [Fase 10] — 2026-08-10 — Pendências do roadmap
+
+### Corrigido
+
+- **Concorrência na migração SQLite**: `Database.initialize()` não era
+  serializado e podia quebrar migração sob corrida; agora roda sob lock por
+  instância (descoberto pelo novo teste de concorrência).
+- **Dependências vulneráveis (pip-audit)**: `cryptography 46.0.7` (4 CVEs,
+  runtime TLS) → `50.0.0`; `pytest 8.4.2` (1 CVE) → `9.1.1`. Resultado:
+  `No known vulnerabilities found`.
+
+### Adicionado
+
+- Testes de concorrência (`server/tests/test_concurrency.py`): limiter sob
+  threads, reset por origem, escritas otimistas sem lost update, migração
+  concorrente idempotente.
+- Adaptador `application` fechado (`app/catalog.py` + `WindowsApplicationAdapter`):
+  catálogo de binários sem paths, execução via `ShellExecuteW`, id fora do
+  catálogo → rejeição; 8 testes.
+- Acessibilidade: `liveRegion` em feedbacks (editor, gestão, status), `stateDescription`
+  e `contentDescription` de seleção no editor, strings `a11y_*` PT-BR.
+- Undo/retry no editor: botão "Reverter alterações" após falha de save
+  (roadmap Fase 4), com teste unitário.
+- CI: steps Bandit (`-ll`) e pip-audit no job server + Gitleaks scan.
+- Benchmark de latência press→ack sobre WSS real:
+  `server/scripts/phase10_latency_bench.py` — medição observada no loopback
+  TLS: min 6,6 ms / mediana 7,2 ms / max 8,2 ms (5 iterações).
+- Validação do caminho signed com keystore **descartável**:
+  `server/scripts/phase10_sign_validation.py` (apksigner + aapt2 + cleanup;
+  identidade de produção nunca criada).
+
+### Validado
+
+- Servidor: `361 passed`; Bandit sem issues; pip-audit zero vulns;
+  Ruff/compile/lock/diff limpos.
+- Android: `46` testes unit; lint `0` erros/`10` warnings (aceitas);
+  builds OK; Pixel_8 abre sem crash; E2E Fase 7 reexecutado.
+- Assinatura: `SIGNED_VALIDATION=ok` + `CLEANUP=done` (2×), sem resíduos.
+
+### Restante (somente dependências externas)
+
+- **Galaxy A10** (hardware) e **distribuição real assinada** (keystore de
+  produção externo).
 
 ## [Fase 9] — 2026-08-10 — CI sem segredos e hardening de borda/observabilidade
 

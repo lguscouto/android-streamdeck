@@ -28,7 +28,9 @@ def _wait_for_health(port: int, process: subprocess.Popen[bytes]) -> dict[str, s
         if process.poll() is not None:
             raise RuntimeError("bundled server exited before health became available")
         try:
-            with urllib.request.urlopen(url, timeout=1.0) as response:
+            # nosec B310: loopback host only (127.0.0.1 ephemeral port), no
+            # file:// or custom schemes reachable from this harness.
+            with urllib.request.urlopen(url, timeout=1.0) as response:  # nosec B310
                 payload = json.loads(response.read().decode("utf-8"))
             if payload != {
                 "status": "ok",
@@ -53,7 +55,8 @@ def _http_json(
     if body is not None:
         request.add_header("Content-Type", "application/json")
     try:
-        with urllib.request.urlopen(request, timeout=5.0) as response:
+        # nosec B310: requests target the ephemeral loopback harness only.
+        with urllib.request.urlopen(request, timeout=5.0) as response:  # nosec B310
             raw = response.read().decode("utf-8")
             return response.status, json.loads(raw)
     except urllib.error.HTTPError as exc:

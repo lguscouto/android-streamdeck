@@ -1,11 +1,16 @@
 package br.com.gustavo.streamdeck.ui
 
 import android.graphics.Color as AndroidColor
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,45 +19,68 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Apps
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.outlined.MusicNote
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import br.com.gustavo.streamdeck.R
 import br.com.gustavo.streamdeck.network.StreamDeckButton
 import br.com.gustavo.streamdeck.network.StreamDeckPage
+import br.com.gustavo.streamdeck.ui.ButtonExecutionState
+import br.com.gustavo.streamdeck.ui.theme.CommandColors
+import br.com.gustavo.streamdeck.ui.theme.CommandShapes
+import br.com.gustavo.streamdeck.ui.theme.CommandSpacing
+import br.com.gustavo.streamdeck.ui.settings.DeckDensity
 
-enum class ButtonExecutionState {
-    IDLE,
-    EXECUTING,
-    COMPLETED,
-    REJECTED,
-}
-
+/** Renders the server-defined logical grid as a full-screen command surface. */
 @Composable
 fun StreamDeckGrid(
     page: StreamDeckPage,
     buttonStates: Map<String, ButtonExecutionState>,
     onButtonPress: (StreamDeckButton) -> Unit,
     modifier: Modifier = Modifier,
+    density: DeckDensity = DeckDensity.COMFORTABLE,
+    reduceMotion: Boolean = false,
+    hapticsEnabled: Boolean = true,
 ) {
+    val metrics = density.metrics()
     val cells = GridLayout.cells(page)
     LazyVerticalGrid(
-        columns = GridCells.Fixed(page.columns),
+        columns = GridCells.Fixed(page.columns.coerceAtLeast(1)),
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(metrics.gap),
+        horizontalArrangement = Arrangement.spacedBy(metrics.gap),
+        verticalArrangement = Arrangement.spacedBy(metrics.gap),
     ) {
         items(
             items = cells,
@@ -66,6 +94,9 @@ fun StreamDeckGrid(
                     button = button,
                     executionState = buttonStates[button.id] ?: ButtonExecutionState.IDLE,
                     onClick = { onButtonPress(button) },
+                    metrics = metrics,
+                    reduceMotion = reduceMotion,
+                    hapticsEnabled = hapticsEnabled,
                 )
             }
         }
@@ -78,7 +109,6 @@ private fun EmptyGridCell() {
     Box(
         modifier = Modifier
             .aspectRatio(1f)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
             .semantics { contentDescription = description },
     )
 }
@@ -88,66 +118,125 @@ private fun ActionGridButton(
     button: StreamDeckButton,
     executionState: ButtonExecutionState,
     onClick: () -> Unit,
+    metrics: DeckLayoutMetrics,
+    reduceMotion: Boolean,
+    hapticsEnabled: Boolean,
 ) {
     val statusText = executionState.label()
+    val hapticFeedback = LocalHapticFeedback.current
     val description = stringResource(
         R.string.action_button_description,
         button.title,
         statusText,
     )
-    val containerColor = buttonColor(button, executionState)
-    Button(
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val targetScale = if (pressed) 0.96f else 1f
+    val animatedScale by animateFloatAsState(
+        targetValue = targetScale,
+        animationSpec = spring(stiffness = 700f),
+        label = "command-key-scale",
+    )
+    val scale = if (reduceMotion) 1f else animatedScale
+    val baseColor = buttonColor(button)
+    val containerColor = when (executionState) {
+        ButtonExecutionState.IDLE -> baseColor
+        ButtonExecutionState.EXECUTING -> lerp(baseColor, CommandColors.Pulse, 0.24f)
+        ButtonExecutionState.COMPLETED -> CommandColors.Success
+        ButtonExecutionState.REJECTED -> CommandColors.Danger
+    }
+    val contentColor = if (containerColor.luminance() > 0.58f) {
+        CommandColors.Obsidian
+    } else {
+        CommandColors.Mist
+    }
+
+    Surface(
         modifier = Modifier
             .aspectRatio(1f)
-            .semantics { contentDescription = description },
-        onClick = onClick,
-        enabled = executionState != ButtonExecutionState.EXECUTING,
-        colors = ButtonDefaults.buttonColors(
-            containerColor = containerColor,
-            contentColor = Color.White,
-            disabledContainerColor = containerColor.copy(alpha = 0.72f),
-            disabledContentColor = Color.White.copy(alpha = 0.92f),
-        ),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            if (executionState == ButtonExecutionState.EXECUTING) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(30.dp),
-                    color = Color.White,
-                    strokeWidth = 3.dp,
-                )
-            } else {
-                Text(
-                    text = iconGlyph(button.icon),
-                    style = MaterialTheme.typography.headlineMedium,
-                )
-            }
-            Spacer(modifier = Modifier.size(6.dp))
-            Text(
-                text = button.title,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.labelLarge,
-                textAlign = TextAlign.Center,
+            .graphicsScale(scale)
+            .clip(CommandShapes.key)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                enabled = executionState != ButtonExecutionState.EXECUTING,
+                role = Role.Button,
+                onClick = {
+                    if (hapticsEnabled) {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                    }
+                    onClick()
+                },
             )
-            if (executionState != ButtonExecutionState.IDLE) {
+            .semantics {
+                contentDescription = description
+                role = Role.Button
+            },
+        shape = CommandShapes.key,
+        color = containerColor,
+        contentColor = contentColor,
+        tonalElevation = 2.dp,
+        shadowElevation = if (pressed) 0.dp else 3.dp,
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(metrics.innerPadding),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    imageVector = iconFor(button.icon),
+                    contentDescription = null,
+                    modifier = Modifier.size(metrics.iconSize),
+                )
                 Text(
-                    text = statusText,
-                    maxLines = 1,
+                    text = button.title.ifBlank { "Comando" },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = CommandSpacing.xs),
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.labelSmall,
+                    style = MaterialTheme.typography.labelLarge,
                     textAlign = TextAlign.Center,
                 )
+            }
+            if (executionState == ButtonExecutionState.EXECUTING) {
+                CircularProgressIndicator(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(CommandSpacing.xs)
+                        .size(18.dp),
+                    color = contentColor,
+                    strokeWidth = 2.dp,
+                )
+            }
+            if (executionState != ButtonExecutionState.IDLE) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = CommandSpacing.xs),
+                    shape = CommandShapes.pill,
+                    color = contentColor.copy(alpha = 0.16f),
+                    contentColor = contentColor,
+                ) {
+                    Text(
+                        text = statusText,
+                        modifier = Modifier.padding(horizontal = CommandSpacing.xs, vertical = 2.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
             }
         }
     }
 }
+
+private fun Modifier.graphicsScale(scale: Float): Modifier =
+    this.graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+    }
 
 @Composable
 private fun ButtonExecutionState.label(): String = when (this) {
@@ -157,22 +246,42 @@ private fun ButtonExecutionState.label(): String = when (this) {
     ButtonExecutionState.REJECTED -> stringResource(R.string.action_state_rejected)
 }
 
-@Composable
-private fun buttonColor(
-    button: StreamDeckButton,
-    executionState: ButtonExecutionState,
-): Color = when (executionState) {
-    ButtonExecutionState.COMPLETED -> MaterialTheme.colorScheme.tertiary
-    ButtonExecutionState.REJECTED -> MaterialTheme.colorScheme.error
-    ButtonExecutionState.EXECUTING -> MaterialTheme.colorScheme.secondary
-    ButtonExecutionState.IDLE -> button.color?.let { color ->
-        Color(AndroidColor.parseColor(color))
-    } ?: MaterialTheme.colorScheme.primary
+private data class DeckLayoutMetrics(
+    val gap: Dp,
+    val innerPadding: Dp,
+    val iconSize: Dp,
+)
+
+private fun DeckDensity.metrics(): DeckLayoutMetrics = when (this) {
+    DeckDensity.COMPACT -> DeckLayoutMetrics(
+        gap = 4.dp,
+        innerPadding = 8.dp,
+        iconSize = 24.dp,
+    )
+    DeckDensity.COMFORTABLE -> DeckLayoutMetrics(
+        gap = CommandSpacing.xs,
+        innerPadding = CommandSpacing.sm,
+        iconSize = 30.dp,
+    )
+    DeckDensity.SPACIOUS -> DeckLayoutMetrics(
+        gap = CommandSpacing.sm,
+        innerPadding = CommandSpacing.md,
+        iconSize = 36.dp,
+    )
 }
 
-private fun iconGlyph(icon: String?): String = when (icon) {
-    "keyboard" -> "⌨"
-    "play_pause" -> "▶"
-    "book" -> "▤"
-    else -> "●"
+private fun buttonColor(button: StreamDeckButton): Color {
+    val parsed = button.color?.let { raw ->
+        runCatching { Color(AndroidColor.parseColor(raw)) }.getOrNull()
+    }
+    return parsed ?: CommandColors.Slate
+}
+
+private fun iconFor(icon: String?): ImageVector = when (icon) {
+    "keyboard" -> Icons.Outlined.Keyboard
+    "play_pause" -> Icons.Outlined.PlayArrow
+    "book" -> Icons.AutoMirrored.Outlined.MenuBook
+    "media" -> Icons.Outlined.MusicNote
+    "application" -> Icons.Outlined.Apps
+    else -> Icons.Outlined.Build
 }

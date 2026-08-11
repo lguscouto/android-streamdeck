@@ -82,6 +82,7 @@ class Settings:
     tls_state_dir: str | Path = DEFAULT_TLS_STATE_DIR
     tls_identities: tuple[str, ...] = ()
     log_dir: str | Path = DEFAULT_LOG_DIR
+    websocket_idle_timeout: float = 60.0
 
     def __post_init__(self) -> None:
         if not 1 <= self.port <= 65535:
@@ -158,6 +159,7 @@ class Settings:
             or DEFAULT_DISCOVERY_NAME
         )
         log_dir = os.getenv("STREAMDECK_LOG_DIR", "").strip() or DEFAULT_LOG_DIR
+        raw_ws_idle = os.getenv("STREAMDECK_WEBSOCKET_IDLE_TIMEOUT", "").strip()
 
         try:
             port = int(raw_port)
@@ -180,6 +182,18 @@ class Settings:
         else:
             raise ValueError("STREAMDECK_DISCOVERY_ENABLED must be a boolean")
 
+        if raw_ws_idle:
+            try:
+                websocket_idle_timeout = float(raw_ws_idle)
+            except ValueError as exc:
+                raise ValueError(
+                    "STREAMDECK_WEBSOCKET_IDLE_TIMEOUT must be a number"
+                ) from exc
+            if websocket_idle_timeout <= 0:
+                raise ValueError("STREAMDECK_WEBSOCKET_IDLE_TIMEOUT must be positive")
+        else:
+            websocket_idle_timeout = 60.0
+
         return cls(
             host=host,
             port=port,
@@ -193,4 +207,5 @@ class Settings:
             tls_state_dir=tls_state_dir or DEFAULT_TLS_STATE_DIR,
             tls_identities=tls_identities,
             log_dir=log_dir,
+            websocket_idle_timeout=websocket_idle_timeout,
         )

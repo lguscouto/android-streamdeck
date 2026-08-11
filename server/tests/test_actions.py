@@ -157,10 +157,12 @@ def test_action_registry_executes_media_adapter() -> None:
 def test_action_registry_rejects_action_without_an_explicit_adapter() -> None:
     registry = ActionRegistry()
 
+    # The default catalog is empty: an application id that is not registered is
+    # rejected with the adapter's user-facing message.
     with pytest.raises(ActionExecutionRejected) as error:
         registry.execute(ApplicationAction(type="application", app_id="not-enabled"))
 
-    assert error.value.public_message == "Action type is not enabled"
+    assert error.value.public_message == "Application is not enabled"
 
 
 def test_windows_hotkey_adapter_rejects_key_outside_closed_virtual_key_map() -> None:

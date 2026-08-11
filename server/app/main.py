@@ -72,6 +72,7 @@ def create_app(
         pairing_service=pairing_service,
         require_auth=runtime_settings.require_auth,
         action_executor=action_executor,
+        idle_timeout=runtime_settings.websocket_idle_timeout,
     )
     application = FastAPI(title=SERVICE_NAME, version=PROTOCOL_VERSION)
     application.state.settings = runtime_settings

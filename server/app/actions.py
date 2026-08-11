@@ -6,8 +6,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from app.catalog import ApplicationCatalog
 from app.schemas import (
     Action,
+    ApplicationAction,
     HotkeyAction,
     KeyAction,
     MediaAction,
@@ -195,6 +197,54 @@ class WindowsUrlAdapter:
             raise ActionExecutionRejected("Action could not be completed") from exc
 
 
+def _default_application_catalog() -> ApplicationCatalog:
+    """Catalog of applications the server may launch for ``application`` actions.
+
+    Entries are fixed at build time and never read from the client. Only the
+    executable named here can be launched; unknown ids are rejected.
+    """
+    return ApplicationCatalog({})
+
+
+def _open_windows_application(executable: str) -> None:
+    if sys.platform != "win32":
+        raise ActionExecutionRejected("Application execution requires Windows")
+    result = ctypes.windll.shell32.ShellExecuteW(
+        None,
+        "open",
+        executable,
+        None,
+        None,
+        1,
+    )
+    if result <= 32:
+        raise ActionExecutionRejected("Application could not be started")
+
+
+class WindowsApplicationAdapter:
+    """Launch a Windows application by id resolved through a closed catalog."""
+
+    def __init__(
+        self,
+        catalog: ApplicationCatalog | None = None,
+        *,
+        launcher: Callable[[str], None] | None = None,
+    ) -> None:
+        self._catalog = catalog or _default_application_catalog()
+        self._launcher = launcher or _open_windows_application
+
+    def execute(self, action: ApplicationAction) -> None:
+        entry = self._catalog.get(action.app_id)
+        if entry is None:
+            raise ActionExecutionRejected("Application is not enabled")
+        try:
+            self._launcher(entry.executable)
+        except ActionExecutionRejected:
+            raise
+        except Exception as exc:
+            raise ActionExecutionRejected("Action could not be completed") from exc
+
+
 class _KeyboardInput(ctypes.Structure):
     _fields_ = [
         ("wVk", ctypes.c_ushort),
@@ -323,12 +373,17 @@ class ActionRegistry:
         media_adapter: MediaAdapter | None = None,
         text_adapter: TextAdapter | None = None,
         url_adapter: UrlAdapter | None = None,
+        application_catalog: ApplicationCatalog | None = None,
+        application_adapter: WindowsApplicationAdapter | None = None,
     ) -> None:
         self._hotkey_adapter = hotkey_adapter or WindowsHotkeyAdapter()
         self._key_adapter = key_adapter or WindowsKeyAdapter()
         self._media_adapter = media_adapter or WindowsMediaAdapter()
         self._text_adapter = text_adapter or WindowsTextAdapter()
         self._url_adapter = url_adapter or WindowsUrlAdapter()
+        self._application_adapter = application_adapter or WindowsApplicationAdapter(
+            catalog=application_catalog
+        )
 
     def execute(self, action: Action) -> ActionExecutionResult:
         if isinstance(action, HotkeyAction):
@@ -346,6 +401,9 @@ class ActionRegistry:
         if isinstance(action, UrlAction):
             self._url_adapter.execute(action)
             return ActionExecutionResult(status="completed", message="Action completed")
+        if isinstance(action, ApplicationAction):
+            self._application_adapter.execute(action)
+            return ActionExecutionResult(status="completed", message="Action completed")
         raise ActionExecutionRejected("Action type is not enabled")
 
 
@@ -358,6 +416,7 @@ __all__ = [
     "MediaAdapter",
     "TextAdapter",
     "UrlAdapter",
+    "WindowsApplicationAdapter",
     "WindowsHotkeyAdapter",
     "WindowsKeyAdapter",
     "WindowsMediaAdapter",
