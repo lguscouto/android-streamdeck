@@ -1,0 +1,36 @@
+{
+  "name": "antigravity-streamdeck-server",
+  "version": "1.0.0",
+  "description": "Windows Host Server for AntiGravity Stream Deck",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts"
+  },
+  "keywords": [
+    "streamdeck",
+    "windows",
+    "websocket",
+    "remote-control"
+  ],
+  "author": "AntiGravity",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "obs-websocket-js": "^5.0.8",
+    "qrcode": "^1.5.4",
+    "systeminformation": "^5.33.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.2",
+    "@types/qrcode": "^1.5.5",
+    "@types/ws": "^8.5.13",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.7.2"
+  }
+}
