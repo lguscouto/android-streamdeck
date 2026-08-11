@@ -55,11 +55,26 @@ jobs:
           curl -fsSL --retry 3 -o "$archive" \
             "https://github.com/gitleaks/gitleaks/releases/download/v${version}/gitleaks_${version}_linux_x64.tar.gz"
           tar -xzf "$archive" -C "$RUNNER_TEMP"
+          report="$RUNNER_TEMP/gitleaks.sarif"
+          set +e
           "$RUNNER_TEMP/gitleaks" detect \
             --source . \
             --redact \
             --no-banner \
+            --report-format sarif \
+            --report-path "$report" \
             --exit-code 1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            echo "Gitleaks diagnostic: version=$version sha=$(git rev-parse HEAD)"
+            if [ -s "$report" ]; then
+              jq -r '.runs[].results[] | "::error file=" + (.locations[0].physicalLocation.artifactLocation.uri // "unknown") + ",line=" + ((.locations[0].physicalLocation.region.startLine // 0) | tostring) + ",title=Gitleaks " + (.ruleId // "unknown") + "::redacted finding"' "$report"
+            else
+              echo "Gitleaks did not produce a SARIF report"
+            fi
+          fi
+          exit "$rc"
       - name: Lockfile healthy
         run: uv lock --check
 
