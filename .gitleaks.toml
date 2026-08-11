@@ -1,9 +1,0 @@
-[extend]
-useDefault = true
-
-[[allowlists]]
-description = "False positive: elliptic-curve type guard in historical TLS code"
-commits = ["ed5fce31426db6519452803745260a7d9d34a9cd"]
-paths = ["server/app/tls\\.py"]
-regexTarget = "line"
-regexes = ["key\\.curve,\\s*ec\\.SECP256R1"]
