@@ -34,8 +34,9 @@ de um keystore de produção.
   justificados em 3 falsos positivos de scripts de teste (0.0.0.0 intencional no
   E2E Android; `urlopen` loopback no smoke do bundle).
 - Workflow `gates.yml` ganhou os passos `Bandit security scan`,
-  `pip-audit dependency vulnerabilities` e `Gitleaks secret scan`
-  (`gitleaks/gitleaks-action@v2`).
+  `pip-audit dependency vulnerabilities` e Gitleaks por execução direta do
+  binário oficial `8.30.1`, com `.gitleaksignore` apenas para o falso positivo
+  histórico confirmado.
 
 ### 3. Adaptador `application` fechado (Fase 4)
 
