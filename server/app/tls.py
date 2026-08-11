@@ -317,9 +317,10 @@ def _load_private_key(path: Path, label: str) -> ec.EllipticCurvePrivateKey:
         key = serialization.load_pem_private_key(path.read_bytes(), password=None)
     except (OSError, TypeError, ValueError) as exc:
         raise TlsMaterialError(f"TLS {label} is invalid") from exc
-    if not isinstance(key, ec.EllipticCurvePrivateKey) or not isinstance(
-        key.curve, ec.SECP256R1
-    ):
+    if not isinstance(key, ec.EllipticCurvePrivateKey):
+        raise TlsMaterialError(f"TLS {label} is invalid")
+    curve = getattr(key, "curve", None)
+    if not isinstance(curve, ec.SECP256R1):
         raise TlsMaterialError(f"TLS {label} is invalid")
     return key
 
