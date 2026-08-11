@@ -26,6 +26,18 @@
       "maxLength": 64,
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$"
     },
+    "sessionId": {
+      "type": "string",
+      "minLength": 22,
+      "maxLength": 22,
+      "pattern": "^[A-Za-z0-9_-]{22}$"
+    },
+    "clientProof": {
+      "type": "string",
+      "minLength": 43,
+      "maxLength": 43,
+      "pattern": "^[A-Za-z0-9_-]{43}$"
+    },
     "accessToken": {
       "type": "string",
       "minLength": 32,
@@ -37,8 +49,7 @@
       "additionalProperties": false,
       "required": [
         "client_id",
-        "client_version",
-        "pairing_code"
+        "client_version"
       ],
       "properties": {
         "client_id": {
@@ -47,10 +58,31 @@
         "client_version": {
           "$ref": "#/$defs/versionString"
         },
+        "session_id": {
+          "$ref": "#/$defs/sessionId"
+        },
+        "client_proof": {
+          "$ref": "#/$defs/clientProof"
+        },
         "pairing_code": {
           "$ref": "#/$defs/pairingCode"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "required": ["session_id", "client_proof"],
+          "not": {"required": ["pairing_code"]}
+        },
+        {
+          "required": ["pairing_code"],
+          "not": {
+            "anyOf": [
+              {"required": ["session_id"]},
+              {"required": ["client_proof"]}
+            ]
+          }
+        }
+      ]
     },
     "claimResponse": {
       "type": "object",

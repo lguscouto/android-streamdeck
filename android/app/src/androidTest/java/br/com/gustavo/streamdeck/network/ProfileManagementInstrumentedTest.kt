@@ -1,6 +1,7 @@
 package br.com.gustavo.streamdeck.network
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -8,8 +9,9 @@ import androidx.test.uiautomator.By
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.Until
 import br.com.gustavo.streamdeck.MainActivity
+import br.com.gustavo.streamdeck.instrumentationActivityIntent
+import org.json.JSONObject
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -20,20 +22,30 @@ class ProfileManagementInstrumentedTest {
 
     @Test
     fun opensProfileManagementLoadsRemoteProfileAndExportsJson() {
-        val pairingCode = InstrumentationRegistry.getArguments()
-            .getString("pairingCode")
-            ?.takeIf { it.isNotBlank() }
-            ?: run {
-                assumeTrue("requires an explicit ephemeral pairing code", false)
-                return
-            }
-        EncryptedPairingStore(context).clear()
+        val fixturePath = InstrumentationRegistry.getArguments()
+            .getString("pairingFixturePath")
+            ?.takeIf { it.matches(Regex("/data/local/tmp/[a-z0-9-]+\\.json")) }
+            ?: error("pairingFixturePath argument is required")
+        val shell = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val fixture = runCatching {
+            val descriptor = shell.executeShellCommand("cat $fixturePath")
+            ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader()
+                .use { JSONObject(it.readText()) }
+        }.getOrElse { error("pairing fixture could not be read") }
+        shell.executeShellCommand("rm -f $fixturePath").close()
+        val serverAddress = fixture.optString("server_address")
+            .takeIf { it.isNotBlank() }
+            ?: error("pairing fixture has no server address")
+        val pairingSecret = fixture.optString("pairing_secret")
+            .takeIf { it.isNotBlank() }
+            ?: error("pairing fixture has no temporary secret")
 
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch<MainActivity>(instrumentationActivityIntent(context)).use {
             assertTrue(device.wait(Until.hasObject(By.clazz("android.widget.EditText")), TIMEOUT_MS))
             val fields = device.findObjects(By.clazz("android.widget.EditText"))
-            assertTrue("pairing form did not expose three text fields", fields.size >= 3)
-            fields.last().setText(pairingCode)
+            assertTrue("pairing form did not expose two text fields", fields.size == 2)
+            fields[0].setText(serverAddress)
+            fields[1].setText(pairingSecret)
             device.findObject(By.text("Parear e conectar")).click()
 
             assertTrue(device.wait(Until.hasObject(By.text("Gerenciar perfis e páginas")), TIMEOUT_MS))

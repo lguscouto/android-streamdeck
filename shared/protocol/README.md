@@ -7,6 +7,7 @@ Esta pasta define a versão **1** (`protocol_version: 1`) do contrato entre o ap
 - `v1-profile.schema.json`: perfil, páginas, posições e ações permitidas.
 - `v1-message.schema.json`: envelope e mensagens WebSocket.
 - `../fixtures/default-profile.json`: perfil mínimo válido e seguro para desenvolvimento.
+- `../fixtures/essential-controls-profile.json`: perfil built-in 3 × 3 com oito controles e uma célula livre.
 - `../fixtures/invalid-messages.json`: catálogo de envelopes intencionalmente inválidos para testes de rejeição.
 
 Os nomes dos campos permanecem em inglês para manter um protocolo estável; esta documentação está em PT-BR.
@@ -28,7 +29,7 @@ Um perfil contém `id`, `name`, `revision`, `active_page_id` e `pages`. Cada pá
 | Tipo | Campos obrigatórios | Regra |
 | --- | --- | --- |
 | `hotkey` | `modifiers`, `key` | Modificadores pertencem a uma lista fechada (`ctrl`, `alt`, `shift`, `win`). |
-| `key` | `key` | Uma tecla única, sem comando de sistema livre. |
+| `key` | `key` | Uma tecla única, sem comando de sistema livre; `PRINTSCREEN` é a entrada fechada para `VK_SNAPSHOT`. |
 | `media` | `command` | `command` é uma enumeração fechada de controles multimídia (`play_pause`, `next`, `previous`, `stop`, `volume_up`, `volume_down`, `mute`). |
 | `text` | `text` | Texto limitado pelo schema; não é um comando para o shell. |
 | `url` | `url` | Apenas URLs `https://` são aceitas pelo contrato. |
@@ -79,6 +80,12 @@ O servidor **nunca executa comandos arbitrários** recebidos do cliente. O clien
 
 Tentativas de adicionar propriedades desconhecidas, `shell`, um `command` fora de `media` ou um `media.command` que não esteja no enum devem ser rejeitadas antes de qualquer execução. O fixture `invalid-messages.json` contém exemplos neutros dessas tentativas; ele não deve ser enviado a um servidor de produção.
 
+O perfil built-in `essential-controls` usa a página `Principal` em uma grade 3 × 3
+com os oito controles Play/Pause, Próxima, Mute, Spotify, Chrome, Volume +,
+Volume − e Print Screen. `application/chrome` resolve somente o ID catalogado
+`chrome` no servidor; o cliente nunca envia caminho ou argumentos. Spotify usa a
+sessão multimídia global e Print Screen não transporta a imagem pelo protocolo.
+
 O perfil de exemplo contém apenas uma configuração de hotkey `Ctrl+Shift+S`, um controle multimídia e uma URL HTTPS de documentação. Esses botões são dados de configuração: esta tarefa não executa nenhuma ação.
 
 ## Validação local
@@ -89,6 +96,7 @@ A sintaxe pode ser verificada sem dependências adicionais:
 python3 -m json.tool shared/protocol/v1-profile.schema.json >/dev/null
 python3 -m json.tool shared/protocol/v1-message.schema.json >/dev/null
 python3 -m json.tool shared/fixtures/default-profile.json >/dev/null
+python3 -m json.tool shared/fixtures/essential-controls-profile.json >/dev/null
 python3 -m json.tool shared/fixtures/invalid-messages.json >/dev/null
 ```
 

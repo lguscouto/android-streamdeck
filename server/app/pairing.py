@@ -31,7 +31,7 @@ class PairingService:
 
     @property
     def enabled(self) -> bool:
-        return self._pairing_code is not None
+        return True
 
     def claim_token(
         self,
@@ -44,6 +44,23 @@ class PairingService:
             raise PairingUnavailableError("pairing is not configured")
         if not hmac.compare_digest(pairing_code, configured_code):
             raise PairingCodeInvalidError("pairing code is invalid")
+
+        return self.issue_token(
+            client_id,
+            client_version,
+            actor_kind="pairing_code",
+        )
+
+    def issue_token(
+        self,
+        client_id: str,
+        client_version: str,
+        *,
+        actor_kind: str = "pairing_session",
+    ) -> str:
+        """Issue a token after an already-authenticated pairing session."""
+        if actor_kind not in {"pairing_code", "pairing_session"}:
+            raise ValueError("unsupported pairing actor")
 
         token = secrets.token_urlsafe(32)
         token_hash = _hash_token(token)
@@ -111,12 +128,13 @@ class PairingService:
                         client_id, event_type, credential_generation, actor_kind,
                         reason_code, occurred_at
                     )
-                    VALUES (?, ?, ?, 'pairing_code', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
                         client_id,
                         event_type,
                         credential_generation,
+                        actor_kind,
                         reason_code,
                         timestamp,
                     ),
@@ -202,7 +220,7 @@ class PairingService:
         self, client_id: str, token: str | None
     ) -> int | None:
         """Return the active credential generation only for a valid opaque token."""
-        if not self.enabled or not token:
+        if not token:
             return None
         token_hash = _hash_token(token)
         connection = self.database.connect()
@@ -229,7 +247,7 @@ class PairingService:
         self, client_id: str, credential_generation: int
     ) -> bool:
         """Check that a WebSocket session still has the current active credential."""
-        if not self.enabled or credential_generation < 1:
+        if credential_generation < 1:
             return False
         connection = self.database.connect()
         try:

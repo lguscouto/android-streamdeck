@@ -23,12 +23,16 @@ data class StreamDeckPreferences(
     val density: DeckDensity = DeckDensity.COMFORTABLE,
     val reduceMotion: Boolean = false,
     val hapticsEnabled: Boolean = true,
+    val onboardingVersion: Int = 0,
 )
 
 /** Small, synchronous persistence boundary for settings that must survive restarts. */
-class StreamDeckPreferencesStore(context: Context) {
+class StreamDeckPreferencesStore(
+    context: Context,
+    storageNamespace: String? = null,
+) {
     private val preferences = context.applicationContext.getSharedPreferences(
-        FILE_NAME,
+        storageNamespace?.let { "${FILE_NAME}_$it" } ?: FILE_NAME,
         Context.MODE_PRIVATE,
     )
 
@@ -41,6 +45,7 @@ class StreamDeckPreferencesStore(context: Context) {
             ?: DeckDensity.COMFORTABLE,
         reduceMotion = preferences.getBoolean(KEY_REDUCE_MOTION, false),
         hapticsEnabled = preferences.getBoolean(KEY_HAPTICS, true),
+        onboardingVersion = preferences.getInt(KEY_ONBOARDING_VERSION, 0),
     )
 
     fun save(value: StreamDeckPreferences) {
@@ -49,6 +54,7 @@ class StreamDeckPreferencesStore(context: Context) {
             .putString(KEY_DENSITY, value.density.name)
             .putBoolean(KEY_REDUCE_MOTION, value.reduceMotion)
             .putBoolean(KEY_HAPTICS, value.hapticsEnabled)
+            .putInt(KEY_ONBOARDING_VERSION, value.onboardingVersion)
             .apply()
     }
 
@@ -58,5 +64,6 @@ class StreamDeckPreferencesStore(context: Context) {
         const val KEY_DENSITY = "density"
         const val KEY_REDUCE_MOTION = "reduce_motion"
         const val KEY_HAPTICS = "haptics_enabled"
+        const val KEY_ONBOARDING_VERSION = "onboarding_version"
     }
 }

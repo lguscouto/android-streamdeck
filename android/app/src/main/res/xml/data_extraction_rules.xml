@@ -2,8 +2,9 @@
 <!--
   Backup policy for Android Stream Deck.
 
-  The app persists pairing credentials (access token, private CA pin, trust code)
-  encrypted with credential-encrypted storage. allowBackup is false AND these
+  The app persists pairing credentials (access token, private CA pin, internal
+  client identity and derived trust metadata) encrypted with
+  credential-encrypted storage. allowBackup is false AND these
   rules exclude every domain from both cloud and device-to-device transfer so no
   credential material can cross a backup boundary (Android 12+ device transfer).
 -->

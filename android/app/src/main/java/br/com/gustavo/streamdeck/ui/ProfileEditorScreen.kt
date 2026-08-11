@@ -18,10 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.Build
-import androidx.compose.material.icons.outlined.Keyboard
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.Button
@@ -47,7 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.vector.ImageVector
+
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -63,6 +59,7 @@ import br.com.gustavo.streamdeck.network.StreamDeckProfileSnapshot
 import br.com.gustavo.streamdeck.ui.theme.CommandColors
 import br.com.gustavo.streamdeck.ui.theme.CommandShapes
 import br.com.gustavo.streamdeck.ui.theme.CommandSpacing
+import br.com.gustavo.streamdeck.ui.icons.CommandIconRegistry
 
 @Composable
 fun ProfileEditorScreen(
@@ -191,7 +188,7 @@ fun ProfileEditorScreen(
                         onClick = { iconMenuExpanded = true },
                         enabled = !saving,
                     ) {
-                        Icon(iconFor(draft.icon), contentDescription = null)
+                        Icon(CommandIconRegistry.iconFor(draft.icon), contentDescription = null)
                         Spacer(modifier = Modifier.size(CommandSpacing.xs))
                         Text("Ícone: ${draft.icon.ifBlank { "comando" }}")
                     }
@@ -200,16 +197,24 @@ fun ProfileEditorScreen(
                         onDismissRequest = { iconMenuExpanded = false },
                     ) {
                         listOf(
+                            "play_pause" to "Play/Pause",
+                            "skip_next" to "Próxima",
+                            "volume_off" to "Mute",
+                            "spotify" to "Spotify",
+                            "chrome" to "Chrome",
+                            "volume_up" to "Volume +",
+                            "volume_down" to "Volume −",
+                            "screenshot" to "Print Screen",
                             "keyboard" to "Teclado",
-                            "play_pause" to "Reprodução",
                             "book" to "Painel",
                             "media" to "Mídia",
                             "application" to "Aplicativo",
-                            "build" to "Comando",
                         ).forEach { (id, label) ->
                             DropdownMenuItem(
                                 text = { Text(label) },
-                                leadingIcon = { Icon(iconFor(id), contentDescription = null) },
+                                leadingIcon = {
+                                    Icon(CommandIconRegistry.iconFor(id), contentDescription = null)
+                                },
                                 onClick = {
                                     iconMenuExpanded = false
                                     onDraftChange(draft.copy(icon = id))
@@ -465,7 +470,11 @@ private fun CommandButtonPreview(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Icon(iconFor(icon), contentDescription = null, modifier = Modifier.size(28.dp))
+                    Icon(
+                        CommandIconRegistry.iconFor(icon),
+                        contentDescription = null,
+                        modifier = Modifier.size(28.dp),
+                    )
                     Text(
                         title.ifBlank { "Comando" },
                         maxLines = 2,
@@ -561,13 +570,4 @@ private fun mediaCommandLabel(command: String): String = when (command) {
     "volume_down" -> "Diminuir volume"
     "mute" -> "Silenciar"
     else -> command
-}
-
-private fun iconFor(icon: String?): ImageVector = when (icon) {
-    "keyboard" -> Icons.Outlined.Keyboard
-    "play_pause" -> Icons.Outlined.PlayArrow
-    "book" -> Icons.AutoMirrored.Outlined.MenuBook
-    "media" -> Icons.Outlined.MusicNote
-    "application" -> Icons.Outlined.Apps
-    else -> Icons.Outlined.Build
 }

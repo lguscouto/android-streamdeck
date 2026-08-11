@@ -10,7 +10,9 @@ import httpx
 from fastapi import FastAPI
 
 from app.config import Settings
+from app.db import Database
 from app.main import create_app
+from app.repositories.profiles import ProfileRepository
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROFILE_PATH = REPO_ROOT / "shared" / "fixtures" / "default-profile.json"
@@ -21,6 +23,13 @@ def load_profile(*, profile_id: str = "default", revision: int = 1) -> dict[str,
     profile["id"] = profile_id
     profile["revision"] = revision
     return profile
+
+
+def make_legacy_app(settings: Settings, **kwargs: Any) -> FastAPI:
+    repository = ProfileRepository(Database(settings.database_path))
+    repository.initialize()
+    repository.seed_profile(load_profile())
+    return create_app(settings, repository=repository, **kwargs)
 
 
 def request(
@@ -68,7 +77,7 @@ def auth_headers(app: FastAPI) -> dict[str, str]:
 
 
 def test_export_returns_current_sanitized_profile_as_json(tmp_path: Path) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_legacy_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
 
     response = request(app, "GET", "/api/v1/profiles/default/export")
 
@@ -83,7 +92,7 @@ def test_export_returns_current_sanitized_profile_as_json(tmp_path: Path) -> Non
 
 
 def test_import_creates_new_profile_at_revision_one(tmp_path: Path) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_legacy_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
     payload = load_profile(profile_id="imported", revision=99)
 
     response = request(
@@ -105,7 +114,7 @@ def test_import_creates_new_profile_at_revision_one(tmp_path: Path) -> None:
 def test_import_updates_existing_profile_using_expected_revision(
     tmp_path: Path,
 ) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_legacy_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
     payload = load_profile(revision=999)
     payload["pages"][0]["buttons"][0]["title"] = "Importado"
 
@@ -124,7 +133,7 @@ def test_import_updates_existing_profile_using_expected_revision(
 
 
 def test_import_and_export_require_authentication_when_enabled(tmp_path: Path) -> None:
-    app = create_app(
+    app = make_legacy_app(
         Settings(
             database_path=tmp_path / "streamdeck.sqlite3",
             host="192.0.2.10",
@@ -177,7 +186,7 @@ def test_import_and_export_require_authentication_when_enabled(tmp_path: Path) -
 def test_import_rejects_stale_expected_revision_without_mutation(
     tmp_path: Path,
 ) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_legacy_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
     first_payload = load_profile(revision=500)
     second_payload = copy.deepcopy(first_payload)
     second_payload["pages"][0]["buttons"][0]["title"] = "Stale"
@@ -209,7 +218,7 @@ def test_import_rejects_stale_expected_revision_without_mutation(
 
 
 def test_import_existing_profile_requires_expected_revision(tmp_path: Path) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_legacy_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
     response = request(
         app,
         "POST",
@@ -228,7 +237,7 @@ def test_import_existing_profile_requires_expected_revision(tmp_path: Path) -> N
 def test_import_rejects_shell_extra_and_invalid_json_with_sanitized_errors(
     tmp_path: Path,
 ) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_legacy_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
     extra = load_profile(profile_id="extra")
     extra["unexpected"] = "nope"
     shell = load_profile(profile_id="shell")
@@ -258,7 +267,7 @@ def test_import_rejects_shell_extra_and_invalid_json_with_sanitized_errors(
 
 
 def test_import_rejects_json_over_512_kib_with_sanitized_error(tmp_path: Path) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_legacy_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
     oversized = json.dumps({"padding": "x" * (512 * 1024)})
 
     response = request(
@@ -291,7 +300,7 @@ def test_import_persistence_succeeds_when_broadcast_fails(tmp_path: Path) -> Non
         ) -> None:
             raise RuntimeError(reason)
 
-    app = create_app(
+    app = make_legacy_app(
         Settings(database_path=tmp_path / "streamdeck.sqlite3"),
         websocket_manager=FailingBroadcast(),
     )

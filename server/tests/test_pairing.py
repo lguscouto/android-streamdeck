@@ -344,3 +344,24 @@ def test_revoked_websocket_session_cannot_execute_press(tmp_path: Path) -> None:
     assert response["type"] == "error"
     assert response["payload"]["code"] == "AUTH_REVOKED"
     assert action_executor.actions == []
+
+
+def test_issue_token_works_without_static_pairing_code() -> None:
+    database = Database(":memory:")
+    database.initialize()
+    service = PairingService(database, None)
+
+    token = service.issue_token("android-session", "0.1.0")
+
+    assert service.authenticate("android-session", token)
+    with database.connect() as connection:
+        audit = connection.execute(
+            "SELECT actor_kind FROM paired_client_audit WHERE client_id = ?",
+            ("android-session",),
+        ).fetchone()
+        client = connection.execute(
+            "SELECT token_hash FROM paired_clients WHERE client_id = ?",
+            ("android-session",),
+        ).fetchone()
+    assert audit["actor_kind"] == "pairing_session"
+    assert client["token_hash"] != token

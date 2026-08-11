@@ -11,10 +11,12 @@ from pydantic import BaseModel
 from app.actions import ActionExecutor
 from app.api import create_router, register_exception_handlers
 from app.body_limit import register_body_limit
+from app.builtin_profiles import install_builtin_profiles
 from app.config import Settings
 from app.db import Database
 from app.pairing import PairingService
-from app.repositories.profiles import ProfileNotFoundError, ProfileRepository
+from app.pairing_session import PairingSessionManager
+from app.repositories.profiles import ProfileRepository
 from app.resources import fixtures_dir
 from app.schemas import Profile
 from app.websocket import WebSocketManager, create_websocket_router
@@ -48,6 +50,9 @@ def create_app(
     repository: ProfileRepository | None = None,
     websocket_manager: Any = None,
     action_executor: ActionExecutor | None = None,
+    pairing_session_manager: PairingSessionManager | None = None,
+    ca_certificate_pem: str | None = None,
+    pairing_server_ip: str | None = None,
 ) -> FastAPI:
     """Create the FastAPI application with optional persistence dependencies."""
     runtime_settings = settings or Settings.from_env()
@@ -57,16 +62,14 @@ def create_app(
         database = Database(runtime_settings.database_path)
         repository = ProfileRepository(database)
         repository.initialize()
-        try:
-            repository.get_profile("default")
-        except ProfileNotFoundError:
-            repository.seed_profile(_load_default_profile())
+        install_builtin_profiles(repository)
     else:
         database = getattr(repository, "database", None)
 
     if database is None:
         raise RuntimeError("pairing requires a database-backed repository")
     pairing_service = PairingService(database, runtime_settings.pairing_code)
+    active_pairing_session_manager = pairing_session_manager or PairingSessionManager()
     active_websocket_manager = websocket_manager or WebSocketManager(
         repository,
         pairing_service=pairing_service,
@@ -79,6 +82,7 @@ def create_app(
     application.state.database = database
     application.state.profile_repository = repository
     application.state.pairing_service = pairing_service
+    application.state.pairing_session_manager = active_pairing_session_manager
     application.state.websocket_manager = active_websocket_manager
     register_body_limit(application)
     register_exception_handlers(application)
@@ -87,6 +91,9 @@ def create_app(
             repository,
             active_websocket_manager,
             pairing_service,
+            active_pairing_session_manager,
+            ca_certificate_pem,
+            pairing_server_ip,
             require_auth=runtime_settings.require_auth,
             admin_code=runtime_settings.admin_code,
         )

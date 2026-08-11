@@ -28,13 +28,16 @@ uso local controlado; qualquer bind remoto exige autenticação e TLS.
 ### Android
 
 - `ServerEndpoint` aceita apenas `https://` e deriva somente `wss://`;
-- CA PEM e código de confiança são recebidos explicitamente fora de banda;
-- o código é derivado da chave pública da CA e comparado antes de criar o
-  `TrustManager`;
+- o formulário expõe apenas IP e senha temporária; client ID e porta são
+  internos;
+- bootstrap TLS temporário autentica a CA por prova HMAC/HKDF derivada da senha;
+  o `TrustManager` só é criado depois dessa prova;
+- QR offline `streamdeck://pair/v1` é mínimo, versionado, estrito e vinculado à
+  sessão de uso único;
 - OkHttp REST e WebSocket usam o mesmo trust manager limitado à CA validada e
   mantêm a verificação padrão de hostname/SAN;
-- sem CA/código verificados, nenhum cliente de rede é criado e a operação falha
-  localmente com `TLS_TRUST_REQUIRED`;
+- sem bundle/prova verificados, nenhum cliente de rede autenticado é criado e a
+  operação falha localmente;
 - endpoint, client ID, token, CA PEM e código são persistidos juntos com
   AES-GCM por chave não exportável do Android Keystore;
 - PEM recebido em uma única linha é normalizado para o formato canônico antes
@@ -54,7 +57,6 @@ registrá-los no Git:
 ```text
 STREAMDECK_HOST=192.168.1.44
 STREAMDECK_PORT=8765
-STREAMDECK_PAIRING_CODE=<código fora do Git>
 STREAMDECK_ADMIN_CODE=<código administrativo separado, fora do Git>
 STREAMDECK_REQUIRE_AUTH=true
 STREAMDECK_TLS_MODE=required
@@ -62,10 +64,10 @@ STREAMDECK_TLS_IDENTITIES=192.168.1.44
 STREAMDECK_DISCOVERY_ENABLED=false
 ```
 
-O servidor gera ou valida a CA e o leaf nesse diretório. O Android deve receber,
-por um canal fora de banda, o certificado público `ca-cert.pem` e o código de
-confiança exibido/derivado dessa CA. Não copie `ca-key.pem`, `leaf-key.pem`,
-tokens ou o banco para o telefone.
+O servidor gera ou valida a CA e o leaf nesse diretório. A janela local gera uma
+senha temporária aleatória e o QR correspondente; não copie `ca-key.pem`,
+`leaf-key.pem`, tokens ou o banco para o telefone. A CA pública do bundle só é
+aceita depois da prova derivada da senha.
 
 A administração de dispositivos é deliberadamente separada do pareamento:
 `STREAMDECK_ADMIN_CODE` habilita `GET /api/v1/devices` e
@@ -118,9 +120,13 @@ env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync \
   python scripts/phase7_android_e2e.py
 ```
 
-O script E2E executa o `PairingFlowInstrumentedTest`, verifica pareamento,
-execução de ações, edição de perfil, reconexão com credencial cifrada e remove
-o processo, porta, banco e material TLS temporários ao terminar.
+O script E2E executa exatamente `OnboardingFlowInstrumentedTest`,
+`VisualGoldenInstrumentedTest` e `PairingFlowInstrumentedTest`, verificando
+onboarding, pareamento, execução de ações, edição de perfil e reconexão com
+credencial cifrada. O harness remove screenshots temporários (`pairing`,
+`editor`, `deck-main`, `deck-secondary` e `settings`), fixture Android, processo,
+porta, banco e material TLS; qualquer falha de cleanup impede o marcador de
+sucesso.
 
 No diretório `android/`, com o JBR/SDK configurados:
 
@@ -131,9 +137,9 @@ No diretório `android/`, com o JBR/SDK configurados:
 ./gradlew :app:connectedDebugAndroidTest
 ```
 
-O teste instrumentado de fluxo completo exige argumentos explícitos de endpoint
-HTTPS, CA PEM em Base64, código de confiança e código de pareamento. Sem eles, o
-caso é pulado deliberadamente; ele nunca cai para HTTP.
+O teste instrumentado de fluxo completo exige argumentos explícitos de IP privado
+e senha temporária. A sessão é criada localmente pelo harness e o teste nunca
+cai para HTTP.
 
 ## Limitações conhecidas
 

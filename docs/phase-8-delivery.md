@@ -92,17 +92,21 @@ O manifesto mesclado do release deve manter `usesCleartextTraffic=false` e
 
 ### Segurança de transporte (loopback x LAN)
 
-- **Loopback (padrão):** `STREAMDECK_HOST=127.0.0.1`, TLS opcional.
-- **LAN (remote bind):** `STREAMDECK_HOST=0.0.0.0` exige `STREAMDECK_REQUIRE_AUTH=true`
-  e `STREAMDECK_TLS_MODE=required`; ver `server/README.md` e
-  [`docs/architecture.md`](architecture.md).
-- A CA pública e o trust code (spki) são obtidos **fora de banda** do estado TLS;
-  mDNS é discovery opt-in e não é raiz de confiança.
+- **Loopback:** o modo local pode usar HTTP/WS somente para desenvolvimento
+  controlado; o cliente Android continua aceitando apenas HTTPS/WSS.
+- **LAN:** `STREAMDECK_HOST=0.0.0.0` exige
+  `STREAMDECK_REQUIRE_AUTH=true` e `STREAMDECK_TLS_MODE=required`; consulte
+  `server/README.md` e [`docs/architecture.md`](architecture.md).
+- O Android valida a prova HMAC do bootstrap antes de instalar a CA restrita;
+  hostname/SAN continua sendo verificado pelo TLS padrão. Não há trust-on-first-use.
 
 ### Pareamento e administração
 
-- Pareamento usa pairing code separado do código administrativo e aplica rate
-  limiting por origem.
+- O fluxo recomendado usa senha temporária de 128 bits ou QR versionado, com
+  expiração de 10 minutos e uso único. Não exige client ID, porta, CA ou trust
+  code na UX.
+- O claim novo envia `session_id` e `client_proof`; `pairing_code` permanece
+  somente como compatibilidade legada.
 - Revogação e reparing fecham imediatamente WebSockets existentes
   (`AUTH_REVOKED`/código `1008`) e invalidam credenciais por `credential_generation`.
 - As respostas administrativas são sanitizadas (`[REDACTED]`).

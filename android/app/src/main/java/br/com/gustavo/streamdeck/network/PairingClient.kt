@@ -13,6 +13,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 class PairingException(
@@ -31,13 +32,130 @@ data class RemoteProfileSummary(
 data class PairingResult(
     val clientId: String,
     val accessToken: String,
+    val tlsTrust: TlsTrust? = null,
+)
+
+data class PairingBootstrapResult(
+    val bundle: PairingBootstrap,
+    val tlsTrust: TlsTrust,
+)
+
+private data class VerifiedPairingBootstrap(
+    val bundle: PairingBootstrap,
+    val pairingKey: ByteArray,
+    val tlsTrust: TlsTrust,
 )
 
 class PairingClient(
     private var httpClient: OkHttpClient? = null,
+    private val bootstrapClientFactory: (() -> OkHttpClient)? = null,
 ) {
     fun configureTlsTrust(tlsTrust: TlsTrust) {
         httpClient = tlsTrust.newHttpClient()
+    }
+
+    suspend fun bootstrap(
+        endpoint: ServerEndpoint,
+        sessionId: String,
+        pairingSecret: String,
+        now: Instant = Instant.now(),
+    ): PairingBootstrapResult {
+        val verified = bootstrapVerified(endpoint, sessionId, pairingSecret, now)
+        return try {
+            PairingBootstrapResult(verified.bundle, verified.tlsTrust)
+        } finally {
+            verified.pairingKey.fill(0)
+        }
+    }
+
+    private suspend fun bootstrapVerified(
+        endpoint: ServerEndpoint,
+        sessionId: String,
+        pairingSecret: String,
+        now: Instant,
+    ): VerifiedPairingBootstrap = withContext(Dispatchers.IO) {
+        var pairingKey = ByteArray(0)
+        try {
+        val normalizedSecret = runCatching { PairingProof.normalizeSecret(pairingSecret) }
+            .getOrElse {
+                throw PairingException("PAIRING_SECRET_INVALID", "Pairing secret is invalid")
+            }
+        val request = Request.Builder()
+            .url(endpoint.pairingBootstrapUrl(sessionId))
+            .get()
+            .build()
+        val bootstrapClient = bootstrapClientFactory?.invoke() ?: BootstrapTls.newClient()
+        bootstrapClient.newCall(request).execute().use { response ->
+            val body = response.body?.string().orEmpty()
+            if (!response.isSuccessful) {
+                throw safeApiException(
+                    body,
+                    "PAIRING_BOOTSTRAP_FAILED",
+                    "Pairing bootstrap failed",
+                )
+            }
+            val bundle = parseBootstrap(body)
+            require(bundle.sessionId == sessionId) {
+                "bootstrap session does not match request"
+            }
+            require(bundle.serverIp == endpoint.serverHost) {
+                "bootstrap server address does not match endpoint"
+            }
+            require(bundle.port == endpoint.serverPort) {
+                "bootstrap server port does not match endpoint"
+            }
+            PairingInput.requirePort(bundle.port)
+            val expiresAt = runCatching { Instant.parse(bundle.expiresAt) }
+                .getOrElse {
+                    throw PairingException("PAIRING_BOOTSTRAP_INVALID", "Bootstrap expiry is invalid")
+                }
+            if (!expiresAt.isAfter(now)) {
+                throw PairingException("PAIRING_EXPIRED", "Pairing session expired")
+            }
+            pairingKey = runCatching {
+                PairingProof.derivePairingKey(normalizedSecret, bundle.salt)
+            }.getOrElse {
+                throw PairingException("PAIRING_BOOTSTRAP_INVALID", "Bootstrap proof is invalid")
+            }
+            val proofValid = runCatching {
+                PairingProof.verifyServerProof(bundle, pairingKey)
+            }.getOrDefault(false)
+            if (!proofValid) {
+                throw PairingException("PAIRING_PROOF_INVALID", "Pairing proof is invalid")
+            }
+            val tlsTrust = runCatching { TlsTrust.fromVerifiedPem(bundle.caCertificatePem) }
+                .getOrElse {
+                    throw PairingException("TLS_CA_INVALID", "Server CA is invalid")
+                }
+            httpClient = tlsTrust.newHttpClient()
+            VerifiedPairingBootstrap(bundle, pairingKey, tlsTrust)
+        }
+        } catch (error: Throwable) {
+            pairingKey.fill(0)
+            throw error
+        }
+    }
+
+    suspend fun bootstrapAndClaim(
+        endpoint: ServerEndpoint,
+        sessionId: String,
+        pairingSecret: String,
+        clientId: String,
+        clientVersion: String,
+        now: Instant = Instant.now(),
+    ): PairingResult {
+        val bootstrapResult = bootstrapVerified(endpoint, sessionId, pairingSecret, now)
+        return try {
+            claimWithProof(
+                endpoint = endpoint,
+                clientId = clientId,
+                clientVersion = clientVersion,
+                sessionId = sessionId,
+                pairingKey = bootstrapResult.pairingKey,
+            ).copy(tlsTrust = bootstrapResult.tlsTrust)
+        } finally {
+            bootstrapResult.pairingKey.fill(0)
+        }
     }
 
     suspend fun claim(
@@ -50,11 +168,40 @@ class PairingClient(
             .put("client_id", clientId)
             .put("client_version", clientVersion)
             .put("pairing_code", pairingCode)
+        postClaim(endpoint, payload, clientId)
+    }
+
+    private suspend fun claimWithProof(
+        endpoint: ServerEndpoint,
+        clientId: String,
+        clientVersion: String,
+        sessionId: String,
+        pairingKey: ByteArray,
+    ): PairingResult = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+            .put("client_id", clientId)
+            .put("client_version", clientVersion)
+            .put(
+                "session_id",
+                sessionId,
+            )
+            .put(
+                "client_proof",
+                PairingProof.clientProof(pairingKey, sessionId, clientId, clientVersion),
+            )
+        postClaim(endpoint, payload, clientId)
+    }
+
+    private fun postClaim(
+        endpoint: ServerEndpoint,
+        payload: JSONObject,
+        fallbackClientId: String,
+    ): PairingResult {
         val request = Request.Builder()
             .url(endpoint.pairingUrl)
             .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .build()
-        secureHttpClient().newCall(request).execute().use { response ->
+        return secureHttpClient().newCall(request).execute().use { response ->
             val body = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 throw safeApiException(body, "PAIRING_FAILED", "Pairing failed")
@@ -66,7 +213,7 @@ class PairingClient(
                 throw PairingException("INVALID_RESPONSE", "Pairing response has no token")
             }
             PairingResult(
-                clientId = result.optString("client_id", clientId),
+                clientId = result.optString("client_id", fallbackClientId),
                 accessToken = token,
             )
         }
@@ -420,6 +567,24 @@ class PairingClient(
     companion object {
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
 
+        private fun parseBootstrap(body: String): PairingBootstrap {
+            return runCatching {
+                val json = JSONObject(body)
+                PairingBootstrap(
+                    version = json.getInt("version"),
+                    sessionId = json.getString("session_id"),
+                    salt = json.getString("salt"),
+                    expiresAt = json.getString("expires_at"),
+                    serverIp = json.getString("server_ip"),
+                    port = json.getInt("port"),
+                    caCertificatePem = json.getString("ca_certificate_pem"),
+                    serverProof = json.getString("server_proof"),
+                )
+            }.getOrElse {
+                throw PairingException("PAIRING_BOOTSTRAP_INVALID", "Bootstrap response is invalid")
+            }
+        }
+
         private fun safeApiException(
             body: String,
             fallbackCode: String,
@@ -435,6 +600,12 @@ class PairingClient(
                 "PAGE_DELETE_PROTECTED" -> "Page deletion requires a replacement"
                 "AUTH_REQUIRED" -> "Authentication required"
                 "PAIRING_CODE_INVALID" -> "Pairing code is invalid"
+                "PAIRING_EXPIRED" -> "Pairing session expired"
+                "PAIRING_USED" -> "Pairing session already used"
+                "PAIRING_PROOF_INVALID" -> "Pairing proof is invalid"
+                "PAIRING_SESSION_INVALID" -> "Pairing session is invalid"
+                "PAIRING_BOOTSTRAP_INVALID" -> "Pairing bootstrap is invalid"
+                "TLS_CA_INVALID" -> "Server CA is invalid"
                 "VALIDATION_ERROR" -> "Request validation failed"
                 else -> fallbackMessage
             }

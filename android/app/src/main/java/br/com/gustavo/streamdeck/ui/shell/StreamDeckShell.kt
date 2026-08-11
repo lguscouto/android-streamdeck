@@ -50,10 +50,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import br.com.gustavo.streamdeck.network.ActionAcknowledgementStatus
+import br.com.gustavo.streamdeck.network.ClientIdentity
 import br.com.gustavo.streamdeck.network.EncryptedPairingStore
 import br.com.gustavo.streamdeck.network.PairingClient
 import br.com.gustavo.streamdeck.network.PairingCredentials
 import br.com.gustavo.streamdeck.network.PairingException
+import br.com.gustavo.streamdeck.network.PairingInput
+import br.com.gustavo.streamdeck.network.PairingProof
+import br.com.gustavo.streamdeck.network.PairingQrPayload
 import br.com.gustavo.streamdeck.network.RemoteProfileSummary
 import br.com.gustavo.streamdeck.network.ProfileSnapshotParser
 import br.com.gustavo.streamdeck.network.ProfileSnapshotSerializer
@@ -74,6 +78,7 @@ import br.com.gustavo.streamdeck.ui.components.ConnectionPill
 import br.com.gustavo.streamdeck.ui.deck.ConnectedDeckScreen
 import br.com.gustavo.streamdeck.ui.components.ConnectionStatus
 import br.com.gustavo.streamdeck.ui.pairing.PairingForm
+import br.com.gustavo.streamdeck.ui.pairing.QrScannerDialog
 import br.com.gustavo.streamdeck.ui.components.PagePager
 import br.com.gustavo.streamdeck.ui.navigation.StreamDeckDestination
 import br.com.gustavo.streamdeck.ui.settings.DeckDensity
@@ -122,10 +127,14 @@ fun StreamDeckApp() {
 @Composable
 fun PairingScreen(
     preferences: StreamDeckPreferences,
+    storageNamespace: String? = null,
     onPreferencesChange: (StreamDeckPreferences) -> Unit,
+    onShowTutorial: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val pairingStore = remember(context) { EncryptedPairingStore(context) }
+    val pairingStore = remember(context, storageNamespace) {
+        EncryptedPairingStore(context, storageNamespace)
+    }
     val storedCredentials = remember(pairingStore) { pairingStore.load() }
     val scope = rememberCoroutineScope()
     val pairingClient = remember { PairingClient() }
@@ -133,19 +142,19 @@ fun PairingScreen(
     val invalidProfileSnapshot = stringResource(R.string.invalid_profile_snapshot)
     val actionNotConnected = stringResource(R.string.action_not_connected)
     val actionSendFailed = stringResource(R.string.action_send_failed)
+    val actionCompleted = stringResource(R.string.action_state_completed)
+    val actionRejected = stringResource(R.string.action_state_rejected)
     var serverAddress by remember {
-        mutableStateOf(storedCredentials?.serverBaseUrl.orEmpty())
+        mutableStateOf(
+            storedCredentials?.serverBaseUrl?.let { baseUrl ->
+                runCatching { ServerEndpoint.parse(baseUrl).serverHost }.getOrNull()
+            }.orEmpty(),
+        )
     }
-    var pairingCode by remember { mutableStateOf("") }
-    var caCertificatePem by remember {
-        mutableStateOf(storedCredentials?.tlsTrust?.caCertificatePem.orEmpty())
-    }
-    var trustCode by remember {
-        mutableStateOf(storedCredentials?.tlsTrust?.trustCode.orEmpty())
-    }
+    var pairingSecret by remember { mutableStateOf("") }
     var tlsTrust by remember { mutableStateOf(storedCredentials?.tlsTrust) }
     var clientId by remember {
-        mutableStateOf(storedCredentials?.clientId ?: "android-emulator")
+        mutableStateOf(storedCredentials?.clientId ?: ClientIdentity.generate())
     }
     var accessToken by remember {
         mutableStateOf(storedCredentials?.accessToken)
@@ -175,6 +184,7 @@ fun PairingScreen(
     var managementImportJson by remember { mutableStateOf("") }
     var managementRetry by remember { mutableStateOf<(() -> Unit)?>(null) }
     var socket by remember { mutableStateOf<WebSocket?>(null) }
+    var showQrScanner by remember { mutableStateOf(false) }
 
     val socketForEffect = socket
     DisposableEffect(socketForEffect) {
@@ -207,8 +217,16 @@ fun PairingScreen(
             buttonStates = emptyMap()
             pendingPresses = emptyMap()
             try {
-                val endpoint = ServerEndpoint.parse(serverAddress)
+                val pairingInput = PairingInput.parseIpv4(serverAddress)
+                val endpoint = ServerEndpoint.fromPrivateIpv4(pairingInput.ipv4)
                 var token = accessToken
+                if (pairingSecret.isNotBlank()) {
+                    token = null
+                    accessToken = null
+                    pairedClientId = null
+                    pairedServerBaseUrl = null
+                    tlsTrust = null
+                }
                 if (!token.isNullOrBlank() && pairedServerBaseUrl != endpoint.httpBaseUrl) {
                     accessToken = null
                     pairedClientId = null
@@ -217,44 +235,50 @@ fun PairingScreen(
                     pairingStore.clear()
                     token = null
                 }
-                val activeTrust = tlsTrust ?: run {
-                    if (caCertificatePem.isBlank() || trustCode.isBlank()) {
-                        throw PairingException(
-                            "TLS_TRUST_REQUIRED",
-                            "Informe a CA PEM e o código de confiança exibido no Windows",
-                        )
-                    }
-                    TlsTrust.fromPem(caCertificatePem, trustCode).also { tlsTrust = it }
-                }
-                pairingClient.configureTlsTrust(activeTrust)
-                websocketClient.configureTlsTrust(activeTrust)
+                val activeTrust: TlsTrust
                 if (token.isNullOrBlank()) {
-                    if (pairingCode.isBlank()) {
+                    val normalizedSecret = runCatching {
+                        PairingProof.normalizeSecret(pairingSecret)
+                    }.getOrElse {
                         throw PairingException(
-                            "PAIRING_CODE_REQUIRED",
-                            "Informe o código de pareamento",
+                            "PAIRING_SECRET_INVALID",
+                            "A senha temporária é inválida",
                         )
                     }
-                    val result = pairingClient.claim(
+                    val sessionId = PairingProof.sessionIdForSecret(normalizedSecret)
+                    val result = pairingClient.bootstrapAndClaim(
                         endpoint = endpoint,
-                        clientId = clientId.trim(),
+                        sessionId = sessionId,
+                        pairingSecret = normalizedSecret,
+                        clientId = clientId,
                         clientVersion = AppMetadata.VERSION_NAME,
-                        pairingCode = pairingCode.trim(),
                     )
                     token = result.accessToken
+                    activeTrust = result.tlsTrust
+                        ?: throw PairingException("TLS_CA_INVALID", "Servidor não forneceu CA autenticada")
+                    tlsTrust = activeTrust
                     accessToken = token
                     val credentials = PairingCredentials.fromStored(
                         serverBaseUrl = endpoint.httpBaseUrl,
                         clientId = result.clientId,
                         accessToken = token,
                         caCertificatePem = activeTrust.caCertificatePem,
-                        trustCode = activeTrust.trustCode,
-                    )
-                        ?: throw PairingException("INVALID_RESPONSE", "Credencial inválida")
+                        trustCode = null,
+                    ) ?: throw PairingException("INVALID_RESPONSE", "Credencial inválida")
                     pairingStore.save(credentials)
+                    clientId = credentials.clientId
                     pairedClientId = credentials.clientId
                     pairedServerBaseUrl = credentials.serverBaseUrl
+                    pairingSecret = ""
+                } else {
+                    activeTrust = tlsTrust
+                        ?: throw PairingException(
+                            "TLS_TRUST_REQUIRED",
+                            "O pareamento salvo não possui confiança TLS válida",
+                        )
                 }
+                pairingClient.configureTlsTrust(activeTrust)
+                websocketClient.configureTlsTrust(activeTrust)
                 socket?.cancel()
                 val authenticatedToken = token
                     ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
@@ -301,14 +325,14 @@ fun PairingScreen(
                                                 buttonId to ButtonExecutionState.COMPLETED
                                             )
                                             pendingPresses = pendingPresses - acknowledgement.requestId
-                                            statusMessage = acknowledgement.message ?: "Ação concluída"
+                                            statusMessage = actionCompleted
                                         }
                                         ActionAcknowledgementStatus.REJECTED -> {
                                             buttonStates = buttonStates + (
                                                 buttonId to ButtonExecutionState.REJECTED
                                             )
                                             pendingPresses = pendingPresses - acknowledgement.requestId
-                                            statusMessage = acknowledgement.message ?: "Ação rejeitada"
+                                            statusMessage = actionRejected
                                         }
                                     }
                                 }
@@ -352,6 +376,40 @@ fun PairingScreen(
                 statusMessage = error.message ?: "Não foi possível conectar"
             }
         }
+    }
+
+    fun acceptQrCode(rawValue: String) {
+        val payload = runCatching { PairingQrPayload.parse(rawValue) }
+            .getOrElse {
+                showQrScanner = false
+                status = ConnectionStatus.ERROR
+                statusMessage = "QR inválido ou incompatível"
+                return
+            }
+        if (payload.port != PairingInput.DEFAULT_PORT) {
+            showQrScanner = false
+            status = ConnectionStatus.ERROR
+            statusMessage = "QR usa uma porta não suportada"
+            return
+        }
+        val normalizedSecret = runCatching {
+            PairingProof.normalizeSecret(payload.pairingSecret)
+        }.getOrElse {
+            showQrScanner = false
+            status = ConnectionStatus.ERROR
+            statusMessage = "Senha do QR inválida"
+            return
+        }
+        if (PairingProof.sessionIdForSecret(normalizedSecret) != payload.sessionId) {
+            showQrScanner = false
+            status = ConnectionStatus.ERROR
+            statusMessage = "QR não corresponde à senha da sessão"
+            return
+        }
+        serverAddress = payload.ipv4
+        pairingSecret = normalizedSecret
+        showQrScanner = false
+        connect()
     }
 
     fun pressButton(button: StreamDeckButton) {
@@ -411,7 +469,8 @@ fun PairingScreen(
         profileSnapshot = updated
         scope.launch {
             try {
-                val endpoint = ServerEndpoint.parse(serverAddress)
+                val pairingInput = PairingInput.parseIpv4(serverAddress)
+                val endpoint = ServerEndpoint.fromPrivateIpv4(pairingInput.ipv4)
                 val token = accessToken
                     ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
                 val authenticatedClientId = pairedClientId ?: clientId.trim()
@@ -480,7 +539,8 @@ fun PairingScreen(
         profileSnapshot = updated.copy(revision = nextRevision)
         scope.launch {
             try {
-                val endpoint = ServerEndpoint.parse(serverAddress)
+                val pairingInput = PairingInput.parseIpv4(serverAddress)
+                val endpoint = ServerEndpoint.fromPrivateIpv4(pairingInput.ipv4)
                 val token = accessToken
                     ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
                 val authenticatedClientId = pairedClientId ?: clientId.trim()
@@ -516,7 +576,8 @@ fun PairingScreen(
             managementConflictCode = null
             managementConflictMessage = null
             try {
-                val endpoint = ServerEndpoint.parse(serverAddress)
+                val pairingInput = PairingInput.parseIpv4(serverAddress)
+                val endpoint = ServerEndpoint.fromPrivateIpv4(pairingInput.ipv4)
                 val token = accessToken
                     ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
                 val authenticatedClientId = pairedClientId ?: clientId.trim()
@@ -579,7 +640,8 @@ fun PairingScreen(
             managementConflictCode = null
             managementConflictMessage = null
             try {
-                val endpoint = ServerEndpoint.parse(serverAddress)
+                val pairingInput = PairingInput.parseIpv4(serverAddress)
+                val endpoint = ServerEndpoint.fromPrivateIpv4(pairingInput.ipv4)
                 val token = accessToken
                     ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
                 val authenticatedClientId = pairedClientId ?: clientId.trim()
@@ -776,7 +838,8 @@ fun PairingScreen(
             managementLoading = true
             managementError = null
             try {
-                val endpoint = ServerEndpoint.parse(serverAddress)
+                val pairingInput = PairingInput.parseIpv4(serverAddress)
+                val endpoint = ServerEndpoint.fromPrivateIpv4(pairingInput.ipv4)
                 val token = accessToken
                     ?: throw PairingException("TOKEN_MISSING", "Token de pareamento ausente")
                 val authenticatedClientId = pairedClientId ?: clientId.trim()
@@ -847,8 +910,7 @@ fun PairingScreen(
         pairedClientId = null
         pairedServerBaseUrl = null
         tlsTrust = null
-        caCertificatePem = ""
-        trustCode = ""
+        pairingSecret = ""
         pairingStore.clear()
         status = ConnectionStatus.DISCONNECTED
         statusMessage = "Pareamento removido"
@@ -876,13 +938,21 @@ fun PairingScreen(
 
     val snapshot = profileSnapshot
     val draft = editorDraft
+    if (showQrScanner) {
+        QrScannerDialog(
+            onQrCode = ::acceptQrCode,
+            onDismiss = { showQrScanner = false },
+        )
+    }
     if (snapshot == null) {
         PairingForm(
             serverAddress = serverAddress,
             onServerAddressChange = { updatedAddress ->
                 serverAddress = updatedAddress
                 val updatedBaseUrl = runCatching {
-                    ServerEndpoint.parse(updatedAddress).httpBaseUrl
+                    PairingInput.parseIpv4(updatedAddress).let { input ->
+                        ServerEndpoint.fromPrivateIpv4(input.ipv4).httpBaseUrl
+                    }
                 }.getOrNull()
                 if (pairedServerBaseUrl != null && updatedBaseUrl != pairedServerBaseUrl) {
                     accessToken = null
@@ -892,41 +962,24 @@ fun PairingScreen(
                     pairingStore.clear()
                 }
             },
-            clientId = clientId,
-            onClientIdChange = { updatedClientId ->
-                clientId = updatedClientId
-                if (updatedClientId.trim() != pairedClientId) {
-                    accessToken = null
-                    pairedClientId = null
-                    pairedServerBaseUrl = null
-                    tlsTrust = null
-                    pairingStore.clear()
-                }
-            },
-            pairingCode = pairingCode,
-            onPairingCodeChange = { pairingCode = it },
+            pairingSecret = pairingSecret,
+            onPairingSecretChange = { pairingSecret = it },
             hasStoredAccessToken = !accessToken.isNullOrBlank(),
-            caCertificatePem = caCertificatePem,
-            onCaCertificatePemChange = {
-                caCertificatePem = it
-                tlsTrust = null
-            },
-            trustCode = trustCode,
-            onTrustCodeChange = {
-                trustCode = it
-                tlsTrust = null
+            onScanQr = {
+                showQrScanner = true
+                statusMessage = null
             },
             onConnect = ::connect,
             onClearPairing = ::clearPairing,
             status = status,
             statusMessage = statusMessage,
-            revision = null,
         )
     } else if (destination == StreamDeckDestination.Settings) {
         SettingsScreen(
             preferences = preferences,
             onPreferencesChange = onPreferencesChange,
             onClose = { destination = StreamDeckDestination.Deck },
+            onShowTutorial = onShowTutorial,
         )
     } else if (destination == StreamDeckDestination.Profiles) {
         ProfileManagementScreen(

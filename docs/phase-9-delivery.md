@@ -112,9 +112,10 @@ assumiam `os.pathsep == ";"` (Windows), enquanto no runner Ubuntu o separador é
 | Android gates (Linux) | ✓ | 2m55s |
 | Windows bundle + smoke | ✓ | 1m6s |
 
-Ações atualizadas para as versões atuais (`checkout@v7`, `setup-uv@v9`,
-`setup-java@v5`, `setup-gradle@v6`) para eliminar avisos de depreciação
-(Node 20 / setup-java v4).
+Ações atualizadas para as versões usadas no workflow (`checkout@v7`,
+`astral-sh/setup-uv@v7`, `setup-java@v5`, `setup-gradle@v6`). O job Android
+compila também `assembleDebugAndroidTest`, evitando que alterações exclusivas
+do APK instrumentado escapem da validação de CI.
 
 ## Como validar o CI
 

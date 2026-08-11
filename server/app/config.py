@@ -97,8 +97,6 @@ class Settings:
             raise ValueError(
                 "admin_code must contain 6-64 ASCII letters, digits, '.', '_' or '-'"
             )
-        if self.require_auth and code is None:
-            raise ValueError("authentication requires a pairing code")
         if self.tls_mode not in {"auto", "required", "disabled"}:
             raise ValueError("tls_mode must be auto, required, or disabled")
         if not isinstance(self.discovery_enabled, bool):

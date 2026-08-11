@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import ipaddress
+import os
+import socket
+from collections.abc import Callable
 from typing import Any
 
 from app.config import Settings
@@ -19,10 +23,14 @@ class TrayApplication:
         *,
         icon_name: str = "android-streamdeck",
         title: str = "Android Stream Deck",
+        pairing_window_factory: Callable[[], Any] | None = None,
     ) -> None:
         self.controller = controller
         self.icon_name = icon_name
         self.title = title
+        self._pairing_window_factory = (
+            pairing_window_factory or self._default_pairing_window
+        )
 
     def build_menu(self, pystray_module: Any) -> Any:
         menu_item = pystray_module.MenuItem
@@ -39,6 +47,7 @@ class TrayApplication:
                 self._stop_server,
                 enabled=lambda _item: self.controller.is_running,
             ),
+            menu_item("Parear dispositivo", self._pair_device),
             menu_item("Sair", self._quit),
         )
 
@@ -71,6 +80,12 @@ class TrayApplication:
             self._notify(icon, "Não foi possível parar o servidor")
         finally:
             icon.update_menu()
+
+    def _pair_device(self, icon: Any, _item: Any) -> None:
+        try:
+            self._pairing_window_factory().open()
+        except Exception:
+            self._notify(icon, "Não foi possível abrir o pareamento")
 
     def _quit(self, icon: Any, _item: Any) -> None:
         try:
@@ -110,6 +125,43 @@ class TrayApplication:
         draw.rectangle((38, 20, 46, 28), fill="#ffffff")
         draw.rectangle((18, 36, 46, 42), fill="#ffffff")
         return image
+
+    def _default_pairing_window(self) -> Any:
+        from app.pairing_window import PairingWindow
+
+        settings = self.controller.settings
+        host = os.getenv("STREAMDECK_PAIRING_SERVER_IP")
+        if host is None:
+            for identity in settings.tls_identities:
+                try:
+                    address = ipaddress.ip_address(identity)
+                except ValueError:
+                    continue
+                if (
+                    address.version == 4
+                    and address.is_private
+                    and not address.is_loopback
+                ):
+                    host = str(address)
+                    break
+        if host is None:
+            try:
+                resolved = ipaddress.ip_address(
+                    socket.gethostbyname(socket.gethostname())
+                )
+            except (OSError, ValueError) as exc:
+                raise TrayUnavailableError(
+                    "private pairing address is unavailable"
+                ) from exc
+            if resolved.version != 4 or not resolved.is_private or resolved.is_loopback:
+                raise TrayUnavailableError("private pairing address is unavailable")
+            host = str(resolved)
+        return PairingWindow(
+            self.controller,
+            host=host,
+            port=settings.port,
+            ca_certificate_path=settings.tls_state_dir / "ca-cert.pem",
+        )
 
 
 def main() -> None:

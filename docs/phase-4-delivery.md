@@ -119,26 +119,9 @@ reconexão e auditoria HTTP sanitizada. O banco temporário e a porta foram
 removidos após a execução. O Galaxy A10 continua não conectado e não é coberto
 por esta validação.
 
-## Operação manual
+## Operação manual (histórica)
 
-Servidor local:
-
-```bash
-cd E:/projetos/android-streamdeck/server
-env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync streamdeck-server
-```
-
-Página de acesso/health:
-
-```text
-http://127.0.0.1:8765/health
-```
-
-Para o emulador Android, use no app:
-
-```text
-http://10.0.2.2:8765
-```
-
-Para bind remoto, configure `STREAMDECK_PAIRING_CODE` fora do Git e mantenha a
-porta restrita à rede privada.
+Este trecho conserva a validação original da Fase 4. O fluxo atual é o
+pareamento temporário HTTPS/WSS descrito em [`server/README.md`](../server/README.md):
+a janela/tray emite senha ou QR de uso único, sem `STREAMDECK_PAIRING_CODE`
+estático, e o endpoint do emulador é `https://10.0.2.2:8765`.

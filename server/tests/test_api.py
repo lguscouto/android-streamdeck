@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import json
 import secrets
@@ -13,10 +14,18 @@ import pytest
 from app.config import Settings
 from app.db import Database
 from app.main import create_app
+from app.pairing_session import (
+    PairingBootstrapBundle,
+    compute_client_proof,
+    derive_pairing_key,
+)
 from app.repositories.profiles import ProfileRepository
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[2] / "shared" / "fixtures" / "default-profile.json"
+)
+VALID_CA_PEM = (
+    "-----BEGIN CERTIFICATE-----\nc3ludGhldGljLWNh\n-----END CERTIFICATE-----"
 )
 
 
@@ -59,9 +68,21 @@ def make_repository(tmp_path: Path) -> ProfileRepository:
     return repository
 
 
-def make_seeded_app(tmp_path: Path, **kwargs: Any) -> Any:
+def make_seeded_app(
+    tmp_path: Path,
+    *,
+    settings: Settings | None = None,
+    **kwargs: Any,
+) -> Any:
+    runtime_settings = settings or Settings(
+        database_path=tmp_path / "streamdeck.sqlite3"
+    )
+    repository = ProfileRepository(Database(runtime_settings.database_path))
+    repository.initialize()
+    repository.seed_profile(load_profile_payload())
     return create_app(
-        Settings(database_path=tmp_path / "streamdeck.sqlite3"),
+        runtime_settings,
+        repository=repository,
         **kwargs,
     )
 
@@ -217,7 +238,7 @@ def test_put_requires_expected_revision(tmp_path: Path) -> None:
 
 def test_app_restart_keeps_user_edited_profile(tmp_path: Path) -> None:
     database_path = tmp_path / "streamdeck.sqlite3"
-    first_app = create_app(Settings(database_path=database_path))
+    first_app = make_seeded_app(tmp_path)
     updated = request(
         first_app,
         "PUT",
@@ -226,7 +247,12 @@ def test_app_restart_keeps_user_edited_profile(tmp_path: Path) -> None:
     )
     assert updated.status_code == 200
 
-    second_app = create_app(Settings(database_path=database_path))
+    second_repository = ProfileRepository(Database(database_path))
+    second_repository.initialize()
+    second_app = create_app(
+        Settings(database_path=database_path),
+        repository=second_repository,
+    )
     current = request(second_app, "GET", "/api/v1/profiles/default/snapshot")
 
     assert current.status_code == 200
@@ -423,14 +449,15 @@ def test_create_app_exposes_runtime_dependencies_on_state(tmp_path: Path) -> Non
 def test_put_requires_client_authentication_when_remote_auth_is_enabled(
     tmp_path: Path,
 ) -> None:
-    app = create_app(
-        Settings(
+    app = make_seeded_app(
+        tmp_path,
+        settings=Settings(
             host="192.0.2.10",
             pairing_code="phase4-code",
             require_auth=True,
             tls_identities=("deck.example.test",),
             database_path=tmp_path / "streamdeck.sqlite3",
-        )
+        ),
     )
     unauthenticated = request(
         app,
@@ -715,3 +742,124 @@ def test_phase5_mutation_payloads_are_closed_and_sanitized(tmp_path: Path) -> No
     )
     assert invalid_order.status_code == 422
     assert invalid_order.json()["code"] == "VALIDATION_ERROR"
+
+
+def make_pairing_session_app(tmp_path: Path) -> tuple[Any, str]:
+    admin_code = f"admin-{secrets.token_urlsafe(24)}"
+    app = create_app(
+        Settings(
+            host="192.168.100.20",
+            port=8765,
+            database_path=tmp_path / "streamdeck.sqlite3",
+            admin_code=admin_code,
+            require_auth=True,
+            tls_mode="required",
+            tls_identities=("192.168.100.20",),
+        ),
+        ca_certificate_pem=VALID_CA_PEM,
+    )
+    return app, admin_code
+
+
+def test_local_pairing_session_returns_one_time_secret_and_bootstrap_bundle(
+    tmp_path: Path,
+) -> None:
+    app, admin_code = make_pairing_session_app(tmp_path)
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    )
+
+    assert created.status_code == 200
+    presentation = created.json()
+    assert set(presentation) == {
+        "session_id",
+        "pairing_code",
+        "expires_at",
+        "server_ip",
+        "port",
+        "qr_uri",
+    }
+    assert presentation["server_ip"] == "192.168.100.20"
+    assert presentation["port"] == 8765
+
+    bootstrap = request(
+        app,
+        "GET",
+        f"/api/v1/pairing/bootstrap?session_id={presentation['session_id']}",
+    )
+    assert bootstrap.status_code == 200
+    assert bootstrap.headers["cache-control"] == "no-store"
+    assert bootstrap.json()["ca_certificate_pem"] == VALID_CA_PEM
+    assert presentation["pairing_code"] not in bootstrap.text
+
+
+def test_session_claim_issues_token_and_replay_is_rejected(tmp_path: Path) -> None:
+    app, admin_code = make_pairing_session_app(tmp_path)
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    ).json()
+    bootstrap_response = request(
+        app,
+        "GET",
+        f"/api/v1/pairing/bootstrap?session_id={created['session_id']}",
+    )
+    bundle = PairingBootstrapBundle(**bootstrap_response.json())
+    salt = base64.urlsafe_b64decode(bundle.salt + "=" * (-len(bundle.salt) % 4))
+    proof = compute_client_proof(
+        derive_pairing_key(created["pairing_code"], salt),
+        session_id=bundle.session_id,
+        client_id="android-session",
+        client_version="0.1.0",
+    )
+    payload = {
+        "session_id": bundle.session_id,
+        "client_id": "android-session",
+        "client_version": "0.1.0",
+        "client_proof": proof,
+    }
+
+    claim = request(app, "POST", "/api/v1/pairing/claim", json_body=payload)
+    replay = request(app, "POST", "/api/v1/pairing/claim", json_body=payload)
+
+    assert claim.status_code == 200
+    assert len(claim.json()["access_token"]) >= 32
+    assert replay.status_code == 409
+    assert replay.json()["code"] == "PAIRING_USED"
+    with app.state.database.connect() as connection:
+        row = connection.execute(
+            "SELECT token_hash FROM paired_clients WHERE client_id = ?",
+            ("android-session",),
+        ).fetchone()
+    assert row is not None
+    assert claim.json()["access_token"] != row["token_hash"]
+
+
+def test_invalid_session_proof_does_not_issue_token(tmp_path: Path) -> None:
+    app, admin_code = make_pairing_session_app(tmp_path)
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    ).json()
+    response = request(
+        app,
+        "POST",
+        "/api/v1/pairing/claim",
+        json_body={
+            "session_id": created["session_id"],
+            "client_id": "android-session",
+            "client_version": "0.1.0",
+            "client_proof": "A" * 43,
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["code"] == "PAIRING_INVALID"
+    assert app.state.pairing_service.list_clients() == []

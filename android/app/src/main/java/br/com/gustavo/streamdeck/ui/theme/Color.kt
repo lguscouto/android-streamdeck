@@ -16,6 +16,10 @@ object CommandColors {
     val Warning = Color(0xFFFFB648)
     val Danger = Color(0xFFFF5D73)
     val Info = Color(0xFF5AA7FF)
+    val Media = Color(0xFF8B5CF6)
+    val Audio = Color(0xFF5AA7FF)
+    val Spotify = Color(0xFF1ED760)
+    val Capture = Color(0xFFFF5D73)
 
     val LightBackground = Color(0xFFF3F6FA)
     val LightSurface = Color(0xFFFFFFFF)

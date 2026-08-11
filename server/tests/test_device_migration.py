@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from app.migrations import _SCHEMA_V1, _SCHEMA_V2, migrate
+from app.migrations import _SCHEMA_V1, _SCHEMA_V2, LATEST_SCHEMA_VERSION, migrate
 
 
 def _create_v2_database(path: Path) -> sqlite3.Connection:
@@ -59,7 +59,10 @@ def test_migration_v2_to_v3_preserves_pairing_without_secret_audit(
             for row in connection.execute("PRAGMA table_info(paired_client_audit)")
         }
 
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert (
+            connection.execute("PRAGMA user_version").fetchone()[0]
+            == LATEST_SCHEMA_VERSION
+        )
         assert tuple(migrated) == (
             "android-legacy-1",
             "0.1.0",
@@ -84,7 +87,10 @@ def test_migration_v2_to_v3_preserves_pairing_without_secret_audit(
         assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
         migrate(connection)
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert (
+            connection.execute("PRAGMA user_version").fetchone()[0]
+            == LATEST_SCHEMA_VERSION
+        )
         audit_count = connection.execute(
             "SELECT COUNT(*) FROM paired_client_audit"
         ).fetchone()[0]

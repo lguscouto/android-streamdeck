@@ -43,4 +43,15 @@ def fixtures_dir() -> Path:
     return shared_dir() / "fixtures"
 
 
-__all__ = ["fixtures_dir", "protocol_dir", "repo_root", "shared_dir"]
+def essential_controls_profile_path() -> Path:
+    """Return the immutable built-in essential-controls profile fixture."""
+    return fixtures_dir() / "essential-controls-profile.json"
+
+
+__all__ = [
+    "essential_controls_profile_path",
+    "fixtures_dir",
+    "protocol_dir",
+    "repo_root",
+    "shared_dir",
+]

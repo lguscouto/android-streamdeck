@@ -1,7 +1,7 @@
 package br.com.gustavo.streamdeck.network
 
 import android.content.Context
-import android.util.Base64
+import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -10,11 +10,18 @@ import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
 import androidx.test.uiautomator.Until
 import br.com.gustavo.streamdeck.MainActivity
+import br.com.gustavo.streamdeck.INSTRUMENTATION_STORAGE_NAMESPACE
+import br.com.gustavo.streamdeck.instrumentationActivityIntent
+import br.com.gustavo.streamdeck.ui.onboarding.CURRENT_ONBOARDING_VERSION
+import br.com.gustavo.streamdeck.ui.settings.StreamDeckPreferences
+import br.com.gustavo.streamdeck.ui.settings.StreamDeckPreferencesStore
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
+import org.junit.After
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -22,50 +29,91 @@ import org.junit.runner.RunWith
 class PairingFlowInstrumentedTest {
     private val device = UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
+    private val preferencesStore = StreamDeckPreferencesStore(
+        context,
+        INSTRUMENTATION_STORAGE_NAMESPACE,
+    )
+    private val pairingStore = EncryptedPairingStore(
+        context,
+        INSTRUMENTATION_STORAGE_NAMESPACE,
+    )
+    private var originalPreferences: StreamDeckPreferences? = null
+    private var originalCredentials: PairingCredentials? = null
+
+    @Before
+    fun bypassFirstRunTutorialForPairingJourney() {
+        originalPreferences = preferencesStore.load()
+        originalCredentials = pairingStore.load()
+        pairingStore.clear()
+        preferencesStore.save(
+            checkNotNull(originalPreferences).copy(
+                onboardingVersion = CURRENT_ONBOARDING_VERSION,
+            ),
+        )
+    }
+
+    @After
+    fun removeGeneratedScreenshots() {
+        listOf("pairing", "editor", "deck-main", "deck-secondary", "settings").forEach { name ->
+            device.executeShellCommand("rm -f /sdcard/streamdeck-golden-$name.png")
+        }
+        originalPreferences?.let(preferencesStore::save)
+        if (originalCredentials == null) {
+            pairingStore.clear()
+        } else {
+            pairingStore.save(originalCredentials!!)
+        }
+    }
 
     @Test
     fun pairsSynchronizesAndReconnectsWithEncryptedToken() {
         val arguments = InstrumentationRegistry.getArguments()
-        val pairingCode = arguments.getString("pairingCode")?.takeIf { it.isNotBlank() }
-        val serverAddress = arguments.getString("serverAddress")?.takeIf { it.isNotBlank() }
-        val trustCode = arguments.getString("trustCode")?.takeIf { it.isNotBlank() }
-        val caCertificatePem = arguments.getString("caPemBase64")
-            ?.takeIf { it.isNotBlank() }
-            ?.let { encoded ->
-                Base64.decode(encoded, Base64.DEFAULT)
-                    .decodeToString()
-                    .replace("\r", "")
-                    .replace("\n", "")
-            }
-        assumeTrue(
-            "requires explicit HTTPS endpoint, private CA and pairing code",
-            pairingCode != null &&
-                serverAddress != null &&
-                trustCode != null &&
-                caCertificatePem != null,
+        val fixturePath = arguments.getString("pairingFixturePath")
+            ?.takeIf { it.matches(Regex("/data/local/tmp/[a-z0-9-]+\\.json")) }
+            ?: error("pairingFixturePath argument is required")
+        val shell = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val fixture = runCatching {
+            val descriptor = shell.executeShellCommand("cat $fixturePath")
+            ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader()
+                .use { JSONObject(it.readText()) }
+        }.getOrElse { error("pairing fixture could not be read") }
+        shell.executeShellCommand("rm -f $fixturePath").close()
+        val pairingSecret = fixture.optString("pairing_secret")
+            .takeIf { it.isNotBlank() }
+            ?: error("pairing fixture has no temporary secret")
+        val serverAddress = fixture.optString("server_address")
+            .takeIf { it.isNotBlank() }
+            ?: error("pairing fixture has no server address")
+        val qrUri = fixture.optString("pairing_qr_uri")
+            .takeIf { it.isNotBlank() }
+        if (qrUri != null) {
+            val qrPayload = PairingQrPayload.parse(qrUri)
+            assertTrue("QR server address mismatch", serverAddress == qrPayload.ipv4)
+            assertEquals(PairingInput.DEFAULT_PORT, qrPayload.port)
+            assertTrue("QR temporary secret mismatch", pairingSecret == qrPayload.pairingSecret)
+            assertTrue(
+                "QR session binding mismatch",
+                PairingProof.sessionIdForSecret(pairingSecret) == qrPayload.sessionId,
+            )
+        }
+        val store = EncryptedPairingStore(
+            context,
+            INSTRUMENTATION_STORAGE_NAMESPACE,
         )
-        requireNotNull(pairingCode)
-        requireNotNull(serverAddress)
-        requireNotNull(trustCode)
-        requireNotNull(caCertificatePem)
-        val store = EncryptedPairingStore(context)
-        store.clear()
 
-        ActivityScenario.launch(MainActivity::class.java).use {
-            val basicFields = waitForFields(minimum = 3)
+        ActivityScenario.launch<MainActivity>(instrumentationActivityIntent(context)).use {
+            val basicFields = waitForFields(minimum = 2)
             basicFields[0].setText(serverAddress)
-            basicFields[2].setText(pairingCode)
-            tapByText("Exibir")
+            basicFields[1].setText(pairingSecret)
             val fields = waitForFields()
-            fields[3].setText(caCertificatePem)
-            fields[4].setText(trustCode)
+            assertTrue("pairing form must expose only two text fields", fields.size == 2)
             tapByText("Parear e conectar")
             assertAuthenticatedProfile()
             captureScreenshot("deck-main")
             assertTextVisible("Secundária")
             tapByText("Secundária")
             assertTextVisible("Página ativa: Secundária")
-            assertTextContains("Secundária · Atalho Ctrl+Shift+S")
+            assertTextContains("Secundária · Play/Pause")
             captureScreenshot("deck-secondary")
             tapByText("Principal")
             assertTextVisible("Página ativa: Principal")
@@ -77,18 +125,15 @@ class PairingFlowInstrumentedTest {
         val credentials = store.load()
         assertNotNull(credentials)
         val encryptedValues = context.getSharedPreferences(
-            "streamdeck_pairing",
+            "streamdeck_pairing_instrumentation",
             Context.MODE_PRIVATE,
         ).all.values.filterIsInstance<String>()
         assertEquals(5, encryptedValues.size)
         assertTrue(encryptedValues.all { it.startsWith("v1:") })
-        assertFalse(encryptedValues.any { it.contains(pairingCode) })
-        assertFalse(encryptedValues.any { it.contains(caCertificatePem) })
-        assertFalse(encryptedValues.any { it.contains(trustCode) })
+        assertFalse(encryptedValues.any { it.contains(pairingSecret) })
 
-        ActivityScenario.launch(MainActivity::class.java).use {
-            // Restored TLS material makes the form taller; move the reconnect
-            // button away from the edge-to-edge navigation area before tapping.
+        ActivityScenario.launch<MainActivity>(instrumentationActivityIntent(context)).use {
+            // The reconnect action uses only the encrypted token and stored TLS trust.
             device.swipe(
                 device.displayWidth / 2,
                 (device.displayHeight * 2) / 3,
@@ -96,10 +141,10 @@ class PairingFlowInstrumentedTest {
                 device.displayHeight / 3,
                 40,
             )
-            tapByText("Parear e conectar")
+            tapByText("Reconectar")
             if (!device.wait(Until.gone(By.text("Desconectado")), 1_500L)) {
                 val label = device.wait(
-                    Until.findObject(By.text("Parear e conectar")),
+                    Until.findObject(By.text("Reconectar")),
                     TIMEOUT_MS,
                 )
                 var reconnectButton = checkNotNull(label) {
@@ -115,7 +160,7 @@ class PairingFlowInstrumentedTest {
             }
             assertAuthenticatedProfile(
                 revision = 4,
-                shortcutTitle = "Atalho fase 4",
+                firstControlTitle = "Atalho fase 4",
             )
         }
     }
@@ -170,16 +215,22 @@ class PairingFlowInstrumentedTest {
     }
 
     private fun assertActionFeedback() {
-        tapByText("Atalho Ctrl+Shift+S")
-        assertTrue(
-            "hotkey action did not complete. Visible: ${visibleNonSensitiveText()}",
-            device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS),
-        )
-        tapByText("Reproduzir/pausar")
-        assertTrue(
-            "media action did not complete. Visible: ${visibleNonSensitiveText()}",
-            device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS),
-        )
+        listOf(
+            "Play/Pause",
+            "Próxima",
+            "Mute",
+            "Spotify",
+            "Chrome",
+            "Volume +",
+            "Volume −",
+            "Print Screen",
+        ).forEach { label ->
+            tapByText(label)
+            assertTrue(
+                "action '$label' did not complete. Visible: ${visibleNonSensitiveText()}",
+                device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS),
+            )
+        }
     }
 
     private fun assertEditorSave() {
@@ -203,7 +254,7 @@ class PairingFlowInstrumentedTest {
         assertTextVisible("Atalho fase 4")
         assertTextVisible("Principal  ·  r4")
     }
-    private fun waitForFields(minimum: Int = 5): List<androidx.test.uiautomator.UiObject2> {
+    private fun waitForFields(minimum: Int = 2): List<androidx.test.uiautomator.UiObject2> {
         assertTrue(device.wait(Until.hasObject(By.clazz("android.widget.EditText")), TIMEOUT_MS))
         repeat(20) {
             val fields = device.findObjects(By.clazz("android.widget.EditText"))
@@ -212,20 +263,27 @@ class PairingFlowInstrumentedTest {
             }
             Thread.sleep(100)
         }
-        error("pairing form did not expose five text fields")
+        error("pairing form did not expose two text fields")
     }
 
     private fun assertAuthenticatedProfile(
         revision: Int = 1,
-        shortcutTitle: String = "Atalho Ctrl+Shift+S",
+        firstControlTitle: String = "Play/Pause",
     ) {
         assertTextVisible("Conectado")
         assertTextVisible("Servidor autenticado")
+        assertTextVisible("Controles essenciais")
         assertTextVisible("Principal  ·  r$revision")
-        assertTextVisible("Principal")
-        assertTextVisible(shortcutTitle)
-        assertTextVisible("Reproduzir/pausar")
-        assertTextVisible("Documentação")
+        listOf(
+            firstControlTitle,
+            "Próxima",
+            "Mute",
+            "Spotify",
+            "Chrome",
+            "Volume +",
+            "Volume −",
+            "Print Screen",
+        ).forEach(::assertTextVisible)
     }
 
     private fun captureSettingsScreenshot() {

@@ -80,26 +80,14 @@ O smoke UiAutomator comprovou pareamento HTTP, WebSocket autenticado, snapshot
 registrou a chamada `ctrl+shift+s`; nenhum atalho real foi emitido no desktop
 nesse smoke.
 
-## Operação manual
+## Operação manual (histórica)
 
-1. Inicie o servidor normalmente, com bind remoto somente sob código de
-   pareamento e autenticação:
-
-   ```bash
-   export STREAMDECK_HOST=0.0.0.0
-   export STREAMDECK_PORT=8765
-   export STREAMDECK_PAIRING_CODE='CODIGO_FORA_DO_GIT'
-   cd E:/projetos/android-streamdeck/server
-   env -u PYTHONPATH -u VIRTUAL_ENV uv run --locked --no-sync streamdeck-server
-   ```
-
-2. No emulador, use `http://10.0.2.2:8765`. Em aparelho físico, use o IP privado
-   do Windows na mesma rede, com a porta permitida somente no perfil privado do
-   firewall.
-3. Pareie pelo código efêmero. O primeiro botão do perfil de desenvolvimento
-   envia `Ctrl+Shift+S` quando pressionado; tenha certeza de que essa é uma ação
-   desejada na janela Windows ativa.
-4. Abra `http://127.0.0.1:8765/health` no host para verificar o servidor local.
+Os comandos abaixo registram a validação original da Fase 3 e não são o fluxo
+atual de pareamento. Para novas instalações, use o fluxo temporário HTTPS/WSS
+descrito em [`server/README.md`](../server/README.md): a janela/tray emite senha
+ou QR de uso único, e o Android envia `session_id` + `client_proof` após o
+bootstrap autenticado. Não use `STREAMDECK_PAIRING_CODE` estático nem
+`http://10.0.2.2:8765`.
 
 ## Limites assumidos
 

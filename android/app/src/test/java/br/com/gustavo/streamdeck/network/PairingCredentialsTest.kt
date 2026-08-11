@@ -27,6 +27,20 @@ class PairingCredentialsTest {
     }
 
     @Test
+    fun `aceita credencial nova com CA autenticada sem trust code da interface`() {
+        val credentials = PairingCredentials.fromStored(
+            serverBaseUrl = "https://10.0.2.2:8765",
+            clientId = "android-1",
+            accessToken = "token",
+            caCertificatePem = TestTlsFixture.CA_PEM,
+            trustCode = null,
+        )
+
+        requireNotNull(credentials)
+        assertEquals(TestTlsFixture.TRUST_CODE, credentials.tlsTrust.trustCode)
+    }
+
+    @Test
     fun `recusa credencial persistida em HTTP para impedir downgrade`() {
         assertNull(
             PairingCredentials.fromStored(

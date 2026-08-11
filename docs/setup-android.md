@@ -64,7 +64,7 @@ O A10 continua não identificado e não medido.
 2. Confirmar que o destino autorizado aparece em `adb devices -l`.
 3. Repetir `adb shell getprop ro.product.model`, `adb shell getprop ro.build.version.sdk`, `adb shell wm size` e `adb shell wm density`, registrando os valores reais neste documento e na matriz de `docs/architecture.md`.
 4. Comparar a API medida com o `minSdk 26` provisório e ajustar o `minSdk` conforme a política de suporte; não deduzir a API a partir do nome “A10”.
-5. Usar tamanho e densidade medidos para validar a grade inicial de 3 colunas x 5 linhas e ajustar o default configurável se necessário.
+5. Usar tamanho e densidade medidos para validar a grade inicial de 3 × 3 e ajustar o default configurável se necessário.
 6. A combinação Kotlin `2.0.21`, AGP `8.8.2`, Gradle `8.10.2`, `compileSdk 35`, `targetSdk 35` e build-tools `35.0.0` foi exercitada em builds reais de debug e release. Isso não substitui a validação física de compatibilidade no A10.
 
 Até essa revisão, o `minSdk 26` é apenas uma escolha provisória para o esqueleto compilável e não uma afirmação de compatibilidade final com o A10.
@@ -228,22 +228,50 @@ O smoke aprovou:
 O destino de validação continua sendo o emulador. O A10 não foi conectado e,
 portanto, permanece sem validação funcional ou visual.
 
-## Recomendação provisória para o desenvolvimento
+## Operação atual de desenvolvimento
 
 - Usar explicitamente o JBR 21 do Android Studio em comandos e configurações locais. O caminho confirmado é `C:\Program Files\Android\Android Studio\jbr\bin\java.exe` (ou `/c/Program Files/Android/Android Studio/jbr/bin/java.exe` no MSYS).
 - Usar o ADB pelo caminho absoluto confirmado enquanto ele não for adicionado ao `PATH`: `C:\Users\gustavo\AppData\Local\Android\Sdk\platform-tools\adb.exe`.
-- Manter o servidor em `127.0.0.1:8765` durante o desenvolvimento local; para testar o Android em LAN/emulador, usar bind remoto somente com `STREAMDECK_PAIRING_CODE` e `STREAMDECK_REQUIRE_AUTH=auto`.
-- Não registrar modelo, API, tamanho ou densidade do A10 como se fossem conhecidos. Esses valores só podem ser preenchidos após uma consulta bem-sucedida ao dispositivo.
+- Para o fluxo Android seguro, o servidor deve usar `STREAMDECK_REQUIRE_AUTH=true` e `STREAMDECK_TLS_MODE=required`; não use HTTP/WS nem `STREAMDECK_PAIRING_CODE` estático em novas instalações.
+- O A10 físico ainda não foi validado; não registrar suas características sem consulta real ao dispositivo.
 
-## Operação LAN e descoberta — Fase 6
+## Operação LAN e descoberta — fluxo atual
 
-A conexão manual por endpoint continua sendo o fluxo garantido: no emulador, use
-`http://10.0.2.2:8765`; em aparelho físico, use o IPv4 privado concreto do
-Windows. A descoberta mDNS do servidor é opt-in, não autentica o host e não
-substitui o primeiro pareamento manual.
+A conexão manual segura é feita por `https://10.0.2.2:8765` no emulador ou pelo
+IPv4 privado concreto do Windows em um aparelho físico. O certificado precisa
+conter o endereço usado no SAN. O tray/janela local oferece **Parear dispositivo**
+e emite uma senha temporária ou QR versionado, válido por 10 minutos e de uso
+único. A senha não é persistida e não deve ser colocada em arquivos de projeto,
+variáveis de ambiente do Gradle, URLs de logs ou linha de comando.
 
-O manifesto de release mantém `usesCleartextTraffic=false`. Portanto, não altere
-o manifesto principal para tentar consumir automaticamente o anúncio mDNS via
-HTTP/WS. Isso só poderá existir em release com transporte TLS/WSS adequado. O
-modo debug permanece o único contexto em que cleartext local é aceitável para
-desenvolvimento controlado.
+O manifesto principal e o fluxo normal Android mantêm `usesCleartextTraffic=false`.
+A descoberta mDNS é apenas auxiliar e não substitui o primeiro pareamento nem a
+validação criptográfica da CA/hostname.
+
+## Incremento atual — validação concluída no Pixel_8
+
+O AVD oficial continua sendo `Pixel_8`/`emulator-5554`, iniciado com janela
+visível. O APK debug é instalado de forma incremental com `adb install -r`; não
+usar `uninstall`, `pm clear` ou modo headless neste projeto.
+
+Os gates locais abaixo foram executados antes do gate final e continuam sendo a
+checagem rápida para alterações futuras:
+
+```bash
+cd E:/projetos/android-streamdeck/android
+export JAVA_HOME='C:/Program Files/Eclipse Adoptium/jdk-21.0.12.8-hotspot'
+export ANDROID_HOME='C:/Users/gustavo/AppData/Local/Android/Sdk'
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+./gradlew.bat :app:testDebugUnitTest :app:assembleDebug \
+  :app:assembleDebugAndroidTest :app:lintDebug --console=plain --no-daemon
+```
+
+O E2E `server/scripts/phase7_android_e2e.py` foi executado no gate final e
+aprovou onboarding, o smoke visual e pareamento/reconexão no `Pixel_8`. Ele usa
+banco/TLS/fixtures temporários e `STREAMDECK_ACTION_MODE=recording`, que não
+abre Chrome, não altera volume e não coloca imagens reais no clipboard. O
+cleanup confirmou XML sem failure/error/skip, porta `8765` liberada e nenhum
+estado temporário residual.
+
+A leitura óptica física do QR e os efeitos reais de Chrome, mídia, volume e
+clipboard continuam fora dos testes automatizados até autorização específica.

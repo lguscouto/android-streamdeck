@@ -14,6 +14,13 @@ class TlsTrustTest {
     }
 
     @Test
+    fun `aceita CA autenticada por prova sem exigir trust code na UX`() {
+        val trust = TlsTrust.fromVerifiedPem(TestTlsFixture.CA_PEM)
+
+        assertEquals(TestTlsFixture.TRUST_CODE, trust.trustCode)
+    }
+
+    @Test
     fun `aceita CA PEM compacta recebida por bootstrap de campo de texto`() {
         val compactPem = TestTlsFixture.CA_PEM.replace("\n", "")
 

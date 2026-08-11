@@ -41,6 +41,7 @@ _NAMED_VIRTUAL_KEYS = {
     "RIGHT": 0x27,
     "DOWN": 0x28,
     "INSERT": 0x2D,
+    "PRINTSCREEN": 0x2C,
     "DELETE": 0x2E,
 }
 _ALPHANUMERIC_VIRTUAL_KEYS = {
@@ -75,6 +76,41 @@ class ActionExecutionRejected(RuntimeError):
     def __init__(self, public_message: str) -> None:
         super().__init__(public_message)
         self.public_message = public_message
+
+
+class RecordingActionExecutor:
+    """Deterministic executor for isolated protocol/UI tests.
+
+    It validates the same Pydantic action objects as production but never emits
+    keyboard input, opens an application, or touches the clipboard. The
+    recorded labels are intentionally limited to the closed action vocabulary.
+    """
+
+    def __init__(self) -> None:
+        self.actions: list[Action] = []
+
+    def execute(self, action: Action) -> ActionExecutionResult:
+        self.actions.append(action)
+        return ActionExecutionResult(
+            "completed",
+            f"Recorded {_recording_label(action)}",
+        )
+
+
+def _recording_label(action: Action) -> str:
+    if isinstance(action, MediaAction):
+        return f"media/{action.command}"
+    if isinstance(action, KeyAction):
+        return f"key/{action.key}"
+    if isinstance(action, ApplicationAction):
+        return f"application/{action.app_id}"
+    if isinstance(action, HotkeyAction):
+        return "hotkey/closed"
+    if isinstance(action, TextAction):
+        return "text/closed"
+    if isinstance(action, UrlAction):
+        return "url/https"
+    return "action/closed"
 
 
 class HotkeyAdapter(Protocol):
@@ -197,13 +233,25 @@ class WindowsUrlAdapter:
             raise ActionExecutionRejected("Action could not be completed") from exc
 
 
-def _default_application_catalog() -> ApplicationCatalog:
+def default_application_catalog() -> ApplicationCatalog:
     """Catalog of applications the server may launch for ``application`` actions.
 
     Entries are fixed at build time and never read from the client. Only the
     executable named here can be launched; unknown ids are rejected.
     """
-    return ApplicationCatalog({})
+    return ApplicationCatalog(
+        {
+            "chrome": {
+                "display_name": "Google Chrome",
+                "executable": "chrome.exe",
+            },
+        }
+    )
+
+
+# Keep the private name available to older internal callers while exposing the
+# stable public factory used by tests and the production registry.
+_default_application_catalog = default_application_catalog
 
 
 def _open_windows_application(executable: str) -> None:
@@ -230,7 +278,7 @@ class WindowsApplicationAdapter:
         *,
         launcher: Callable[[str], None] | None = None,
     ) -> None:
-        self._catalog = catalog or _default_application_catalog()
+        self._catalog = catalog or default_application_catalog()
         self._launcher = launcher or _open_windows_application
 
     def execute(self, action: ApplicationAction) -> None:
@@ -412,6 +460,7 @@ __all__ = [
     "ActionExecutionResult",
     "ActionExecutor",
     "ActionRegistry",
+    "RecordingActionExecutor",
     "KeyAdapter",
     "MediaAdapter",
     "TextAdapter",

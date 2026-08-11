@@ -43,8 +43,7 @@ class TlsTrust private constructor(
         fun fromPem(caCertificatePem: String, trustCode: String): TlsTrust {
             val normalizedPem = canonicalizePem(caCertificatePem)
             val certificate = parseCertificate(normalizedPem)
-            require(certificate.basicConstraints >= 0) { "certificate is not a CA" }
-            certificate.checkValidity()
+            validateCaCertificate(certificate)
             val expectedTrustCode = trustCodeFor(certificate)
             val providedTrustCode = normalizeTrustCode(trustCode)
             require(
@@ -53,11 +52,15 @@ class TlsTrust private constructor(
                     providedTrustCode.toByteArray(Charsets.US_ASCII),
                 ),
             ) { "trust code does not match CA certificate" }
-            return TlsTrust(
-                caCertificatePem = "$normalizedPem\n",
-                trustCode = expectedTrustCode,
-                trustManager = trustManagerFor(certificate),
-            )
+            return createTrust(normalizedPem, certificate, expectedTrustCode)
+        }
+
+        /** Builds strict trust only after the password-authenticated bootstrap proof passed. */
+        fun fromVerifiedPem(caCertificatePem: String): TlsTrust {
+            val normalizedPem = canonicalizePem(caCertificatePem)
+            val certificate = parseCertificate(normalizedPem)
+            validateCaCertificate(certificate)
+            return createTrust(normalizedPem, certificate, trustCodeFor(certificate))
         }
 
         fun trustCodeFor(certificate: X509Certificate): String {
@@ -102,6 +105,21 @@ class TlsTrust private constructor(
                 .generateCertificate(ByteArrayInputStream(pem.toByteArray(Charsets.US_ASCII)))
                 as X509Certificate
         }.getOrElse { throw IllegalArgumentException("CA certificate is invalid", it) }
+
+        private fun validateCaCertificate(certificate: X509Certificate) {
+            require(certificate.basicConstraints >= 0) { "certificate is not a CA" }
+            certificate.checkValidity()
+        }
+
+        private fun createTrust(
+            normalizedPem: String,
+            certificate: X509Certificate,
+            trustCode: String,
+        ): TlsTrust = TlsTrust(
+            caCertificatePem = "$normalizedPem\n",
+            trustCode = trustCode,
+            trustManager = trustManagerFor(certificate),
+        )
 
         private fun normalizeTrustCode(value: String): String {
             val normalized = value.trim().uppercase(Locale.ROOT)

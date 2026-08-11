@@ -9,7 +9,9 @@ import httpx
 from fastapi import FastAPI
 
 from app.config import Settings
+from app.db import Database
 from app.main import create_app
+from app.repositories.profiles import ProfileRepository
 
 FIXTURE_PATH = (
     Path(__file__).resolve().parents[2] / "shared" / "fixtures" / "default-profile.json"
@@ -54,14 +56,22 @@ def _profile(profile_id: str) -> dict[str, Any]:
     return payload
 
 
+def _seeded_app(tmp_path: Path, *, websocket_manager: Any) -> FastAPI:
+    repository = ProfileRepository(Database(tmp_path / "streamdeck.sqlite3"))
+    repository.initialize()
+    repository.seed_profile(_profile("default"))
+    return create_app(
+        Settings(database_path=tmp_path / "streamdeck.sqlite3"),
+        repository=repository,
+        websocket_manager=websocket_manager,
+    )
+
+
 def test_activation_and_deletion_emit_revisioned_lifecycle_events(
     tmp_path: Path,
 ) -> None:
     broadcaster = BroadcastSpy()
-    app = create_app(
-        Settings(database_path=tmp_path / "streamdeck.sqlite3"),
-        websocket_manager=broadcaster,
-    )
+    app = _seeded_app(tmp_path, websocket_manager=broadcaster)
     created = _request(app, "POST", "/api/v1/profiles", json_body=_profile("work"))
     assert created.status_code == 200
     broadcaster.changes.clear()

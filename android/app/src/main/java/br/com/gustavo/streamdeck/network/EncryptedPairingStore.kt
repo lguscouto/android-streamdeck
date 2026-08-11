@@ -16,9 +16,12 @@ import javax.crypto.SecretKey
  * The legacy plaintext keys use this same preference file. On first load after an
  * upgrade, non-encrypted legacy values fail authentication and are deleted.
  */
-class EncryptedPairingStore(context: Context) {
+class EncryptedPairingStore(
+    context: Context,
+    storageNamespace: String? = null,
+) {
     private val preferences = context.applicationContext.getSharedPreferences(
-        PREFERENCES_FILE,
+        storageNamespace?.let { "${PREFERENCES_FILE}_$it" } ?: PREFERENCES_FILE,
         Context.MODE_PRIVATE,
     )
 

@@ -34,7 +34,7 @@ jobs:
       - name: Sync locked dependencies
         run: uv sync --locked
       - name: Full test suite
-        # Current suite: 361 tests on Windows; 2 NTFS/ACL-specific tests may
+        # Current local Windows suite: 388 tests; NTFS/ACL-specific cases may
         # be skipped on non-Windows runners.
         run: uv run --no-sync pytest -q
       - name: Ruff format check
@@ -100,10 +100,11 @@ jobs:
         run: ./gradlew :app:testDebugUnitTest --console=plain --no-daemon
       - name: Lint
         run: ./gradlew :app:lintDebug --console=plain --no-daemon
-      - name: Assemble debug and release (release stays unsigned)
+      - name: Assemble debug, release and instrumentation APKs (release stays unsigned)
         run: >-
           ./gradlew :app:assembleDebug :app:assembleRelease
-          :app:printReleaseSigningStatus --console=plain --no-daemon
+          :app:assembleDebugAndroidTest :app:printReleaseSigningStatus
+          --console=plain --no-daemon
       - name: Assert release is honestly unsigned (no-secrets gate)
         shell: bash
         run: |

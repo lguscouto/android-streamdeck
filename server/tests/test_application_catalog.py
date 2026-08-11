@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from app.actions import ActionExecutionRejected, WindowsApplicationAdapter
+from app.actions import (
+    ActionExecutionRejected,
+    WindowsApplicationAdapter,
+    default_application_catalog,
+)
 from app.catalog import ApplicationCatalog
 from app.schemas import ApplicationAction
 
@@ -100,3 +104,19 @@ def test_catalog_listing_is_sorted_and_names_only() -> None:
     ]
     # Never leaks executable paths to the client.
     assert all("executable" not in item for item in listing)
+
+
+def test_default_catalog_lists_only_sanitized_chrome_metadata() -> None:
+    catalog = default_application_catalog()
+
+    assert catalog.listing() == [{"app_id": "chrome", "display_name": "Google Chrome"}]
+    assert all("executable" not in item for item in catalog.listing())
+
+
+def test_default_application_adapter_launches_fixed_chrome_executable() -> None:
+    launcher = FakeLauncher()
+    adapter = WindowsApplicationAdapter(launcher=launcher)
+
+    adapter.execute(ApplicationAction(type="application", app_id="chrome"))
+
+    assert launcher.opened == ["chrome.exe"]

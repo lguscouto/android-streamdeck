@@ -5,10 +5,12 @@ description = "Minimal local FastAPI server for Android Stream Deck"
 requires-python = ">=3.11,<3.15"
 dependencies = [
     "cryptography>=48,<52",
+    "defusedxml>=0.7,<1.0",
     "fastapi>=0.116,<1.0",
     "jsonschema>=4.23,<5.0",
     "pillow>=11.0,<13.0",
     "pystray>=0.19.5,<1.0",
+    "qrcode[pil]>=8.2,<9.0",
     "referencing>=0.36,<1.0",
     "uvicorn[standard]>=0.35,<1.0",
     "zeroconf>=0.136,<1.0",

@@ -13,4 +13,9 @@ class MainActivity : ComponentActivity() {
             StreamDeckApp()
         }
     }
+
+    companion object {
+        const val TEST_STORAGE_NAMESPACE_EXTRA =
+            "br.com.gustavo.streamdeck.extra.TEST_STORAGE_NAMESPACE"
+    }
 }

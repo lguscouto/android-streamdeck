@@ -8,6 +8,17 @@ class ServerEndpoint private constructor(
     val websocketUrl: String,
     val pairingUrl: String,
 ) {
+    val serverHost: String
+        get() = URI(httpBaseUrl).host
+
+    val serverPort: Int
+        get() = URI(httpBaseUrl).port
+
+    fun pairingBootstrapUrl(sessionId: String): String {
+        require(SESSION_ID.matches(sessionId)) { "pairing session id is invalid" }
+        return "$httpBaseUrl/api/v1/pairing/bootstrap?session_id=$sessionId"
+    }
+
     fun profilesUrl(): String = "$httpBaseUrl/api/v1/profiles"
 
     fun profilesCreateUrl(expectedRevision: Int): String =
@@ -125,6 +136,18 @@ class ServerEndpoint private constructor(
 
     companion object {
         private val STABLE_ID = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+        private val SESSION_ID = Regex("^[A-Za-z0-9_-]{22}$")
+
+        fun fromPrivateIpv4(ip: String, port: Int = PairingInput.DEFAULT_PORT): ServerEndpoint {
+            val input = PairingInput.parseIpv4(ip)
+            val checkedPort = PairingInput.requirePort(port)
+            val base = "https://${input.ipv4}:$checkedPort"
+            return ServerEndpoint(
+                httpBaseUrl = base,
+                websocketUrl = "wss://${input.ipv4}:$checkedPort/api/v1/ws",
+                pairingUrl = "$base/api/v1/pairing/claim",
+            )
+        }
 
         fun parse(raw: String): ServerEndpoint {
             val normalized = raw.trim().trimEnd('/')

@@ -60,6 +60,14 @@ class FakePystray:
     Menu = FakeMenu
 
 
+class FakePairingWindow:
+    def __init__(self) -> None:
+        self.opens = 0
+
+    def open(self) -> None:
+        self.opens += 1
+
+
 def test_tray_menu_exposes_safe_status_and_start_stop_actions() -> None:
     controller = FakeController()
     tray = TrayApplication(controller)
@@ -95,3 +103,18 @@ def test_tray_quit_stops_owned_server_before_closing_icon() -> None:
 
     assert controller.stops == 1
     assert icon.stop_calls == 1
+
+
+def test_tray_menu_opens_local_pairing_window() -> None:
+    controller = FakeController()
+    window = FakePairingWindow()
+    tray = TrayApplication(controller, pairing_window_factory=lambda: window)
+    menu = tray.build_menu(FakePystray)
+    icon = FakeIcon()
+
+    pairing_item = next(
+        item for item in menu.items if item.text == "Parear dispositivo"
+    )
+    pairing_item.callback(icon, pairing_item)
+
+    assert window.opens == 1

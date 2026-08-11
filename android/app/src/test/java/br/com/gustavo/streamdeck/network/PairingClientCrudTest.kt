@@ -10,8 +10,46 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.Instant
 
 class PairingClientCrudTest {
+    @Test
+    fun `bootstrap consulta apenas a sessao e falha fechado quando a CA nao e valida`() = runBlocking {
+        val session = "A".repeat(22)
+        val recorder = RequestRecorder(
+            body = """
+                {
+                  "version":1,
+                  "session_id":"$session",
+                  "salt":"${"A".repeat(22)}",
+                  "expires_at":"2026-08-11T12:00:00Z",
+                  "server_ip":"192.168.100.20",
+                  "port":8765,
+                  "ca_certificate_pem":"synthetic-ca-pem",
+                  "server_proof":"z7ztkkOmrr9CU_vr4rFqGXcl0nub6NbhC9SaqCXdAuo"
+                }
+            """.trimIndent(),
+        )
+        val bootstrapClient = OkHttpClient.Builder().addInterceptor(recorder).build()
+        val client = PairingClient(bootstrapClientFactory = { bootstrapClient })
+
+        val error = runCatching {
+            client.bootstrap(
+                endpoint = ServerEndpoint.fromPrivateIpv4("192.168.100.20"),
+                sessionId = session,
+                pairingSecret = "A".repeat(26),
+                now = Instant.parse("2026-08-11T11:00:00Z"),
+            )
+        }.exceptionOrNull() as PairingException
+
+        assertEquals("TLS_CA_INVALID", error.code)
+        assertEquals(
+            "https://192.168.100.20:8765/api/v1/pairing/bootstrap?session_id=$session",
+            recorder.requests.single().url.toString(),
+        )
+        assertTrue("secret" !in recorder.requests.single().url.toString())
+    }
+
     @Test
     fun `recusa requisicao sem CA privada verificada`() = runBlocking {
         val error = runCatching {

@@ -14,6 +14,10 @@ from app.rate_limit import AttemptRateLimiter
 from app.repositories.profiles import ProfileRepository
 from app.websocket import ClientSession, WebSocketManager
 
+FIXTURE_PATH = (
+    Path(__file__).resolve().parents[2] / "shared" / "fixtures" / "default-profile.json"
+)
+
 
 def make_repository(tmp_path: Path) -> ProfileRepository:
     repository = ProfileRepository(Database(tmp_path / "streamdeck.sqlite3"))
@@ -21,13 +25,20 @@ def make_repository(tmp_path: Path) -> ProfileRepository:
     return repository
 
 
+def make_seeded_app(tmp_path: Path, **kwargs: object):
+    repository = make_repository(tmp_path)
+    repository.seed_profile(json.loads(FIXTURE_PATH.read_text(encoding="utf-8")))
+    return create_app(
+        Settings(database_path=tmp_path / "streamdeck.sqlite3"),
+        repository=repository,
+        **kwargs,
+    )
+
+
 def make_client(
     tmp_path: Path, *, manager: WebSocketManager | None = None
 ) -> TestClient:
-    app = create_app(
-        Settings(database_path=tmp_path / "streamdeck.sqlite3"),
-        websocket_manager=manager,
-    )
+    app = make_seeded_app(tmp_path, websocket_manager=manager)
     return TestClient(app)
 
 
@@ -65,7 +76,7 @@ def test_websocket_handshake_sends_welcome_and_snapshot(tmp_path: Path) -> None:
 def test_websocket_handshake_queues_concurrent_profile_change_after_snapshot(
     tmp_path: Path,
 ) -> None:
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
 
     class BroadcastDuringHandshake(WebSocketManager):
@@ -126,7 +137,7 @@ def test_websocket_valid_press_executes_once_and_caches_completed_ack(
             self.actions.append(action)
             return ActionExecutionResult("completed", "Action completed")
 
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
     action_executor = RecordingActionExecutor()
     manager = WebSocketManager(repository, action_executor=action_executor)
@@ -180,7 +191,7 @@ def test_websocket_action_rejection_is_sanitized_and_cached(tmp_path: Path) -> N
             self.call_count += 1
             raise ActionExecutionRejected("Action type is not enabled")
 
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
     action_executor = RejectingActionExecutor()
     manager = WebSocketManager(repository, action_executor=action_executor)
@@ -230,7 +241,7 @@ def test_websocket_unexpected_action_failure_is_sanitized_and_keeps_session(
         def execute(self, action: object) -> object:
             raise RuntimeError("C:/private/internal-action-detail")
 
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
     manager = WebSocketManager(repository, action_executor=FailingActionExecutor())
     app = create_app(
@@ -334,7 +345,7 @@ def test_websocket_retryable_conflict_is_not_cached(tmp_path: Path) -> None:
             self.call_count += 1
             return ActionExecutionResult("completed", "Action completed")
 
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
     action_executor = RecordingActionExecutor()
     manager = WebSocketManager(repository, action_executor=action_executor)
@@ -402,7 +413,7 @@ def test_websocket_slow_broadcast_connection_is_removed(tmp_path: Path) -> None:
 def test_websocket_press_cannot_target_another_session_profile(
     tmp_path: Path,
 ) -> None:
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
     second_profile = json.loads(
         (
@@ -453,7 +464,7 @@ def test_websocket_press_cannot_target_another_session_profile(
 def test_websocket_profile_change_is_broadcast_to_connected_client(
     tmp_path: Path,
 ) -> None:
-    app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    app = make_seeded_app(tmp_path)
     with TestClient(app) as client:
         with client.websocket_connect("/api/v1/ws") as websocket:
             websocket.send_json(hello_message())
@@ -522,7 +533,7 @@ def test_websocket_handshake_deadline_includes_profile_load(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
     original = repository.get_active_profile
 
@@ -545,7 +556,7 @@ def test_websocket_handshake_deadline_includes_profile_load(
 
 
 def test_websocket_idle_timeout_is_structured(tmp_path: Path) -> None:
-    seeded_app = create_app(Settings(database_path=tmp_path / "streamdeck.sqlite3"))
+    seeded_app = make_seeded_app(tmp_path)
     repository = seeded_app.state.profile_repository
     manager = WebSocketManager(repository, idle_timeout=0.05)
     app = create_app(

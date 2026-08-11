@@ -7,6 +7,79 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o
 projeto adota [Versionamento Semântico](https://semver.org/lang/pt-BR/) para
 versões de produto; fases de desenvolvimento têm identificadores próprios.
 
+## [Fase 11] — 2026-08-11 — Onboarding e controles essenciais
+
+### Adicionado
+
+- Onboarding versionado em três páginas, com pular, navegação, finalização e
+  replay em Configurações; o replay é renderizado sobre o shell e preserva a
+  sessão conectada.
+- Direção visual Command Glow com ícones vetoriais/tintáveis, semântica de cor,
+  estados de execução e grade 3 × 3.
+- Fixture e perfil built-in `Controles essenciais` com Play/Pause, Próxima, Mute,
+  Spotify, Chrome, Volume +, Volume −, Print Screen e uma célula livre.
+- Migração v5 idempotente com marcador transacional, allowlist
+  `PRINTSCREEN`/`VK_SNAPSHOT` e catálogo fechado `chrome` → `chrome.exe`.
+- Executor de gravação opt-in para o harness, sem emissão de input real no
+  Windows.
+
+### Validado
+
+- Servidor: **403 testes**, Ruff check/format, compileall, Bandit e lockfile.
+- Android: `testDebugUnitTest`, `assembleDebug`, `assembleDebugAndroidTest`,
+  `assembleRelease` unsigned e `lintDebug` com `BUILD SUCCESSFUL`.
+- E2E HTTPS/WSS no `Pixel_8`: as três classes instrumentadas foram executadas,
+  sem `failure`, `error` ou `skip`; `android_https_wss_e2e=ok`,
+  `port_released=true` e `temporary_state_removed=true`.
+- O executor `recording` impediu abertura do Chrome e emissão de input real no
+  Windows; não restaram fixtures, screenshots ou bancos temporários.
+
+### Limitações
+
+- A leitura óptica física do QR e os efeitos reais de Chrome, mídia, volume e
+  clipboard não foram executados; o gate usa fixtures e executor gravável.
+- Release permanece unsigned sem keystore autorizada.
+
+
+## [Fase 7] — 2026-08-11 — Pareamento simplificado
+
+### Adicionado
+
+- Sessão efêmera de pareamento com senha aleatória de 128 bits, validade de 10
+  minutos, uso único, rotação e proteção contra replay.
+- Bootstrap HTTPS autenticado pela prova derivada da senha, com CA e hostname
+  validados antes do claim e do WebSocket WSS.
+- Fluxo Android reduzido a IP privado, senha temporária e QR offline via
+  CameraX/ML Kit; client ID, porta, CA, token e confiança TLS permanecem
+  internos.
+- Identidade do dispositivo gerada aleatoriamente e persistida com o Android
+  Keystore; reconexão usa apenas token e confiança persistidos.
+
+### Corrigido
+
+- Harness E2E atualizado para a porta interna `8765`, `10.0.2.2`, bootstrap/
+  claim, provas inválidas, replay, sessão desconhecida, ação WSS, edição e
+  reconexão.
+- Mensagens de ACK de ação são localizadas no Android e não exibem o texto
+  inglês bruto do servidor.
+- Validação estrutural e limite de tamanho do PEM da CA reforçados no servidor.
+
+### Validado
+
+- Suíte completa do servidor, Ruff, formatação, compilação e `uv lock --check`.
+- `:app:testDebugUnitTest`, `:app:assembleDebug`,
+  `:app:assembleDebugAndroidTest` e `:app:lintDebug`.
+- E2E HTTPS/WSS no `Pixel_8`: 1/1 teste instrumentado aprovado,
+  `android_https_wss_e2e=ok`, `port_released=true` e
+  `temporary_state_removed=true`.
+
+### Limitações
+
+- O APK produzido nesta fase é debug assinado pela chave de debug do Android;
+  o APK release depende de um keystore de distribuição autorizado.
+- O fluxo de QR foi validado pelo payload estrito e pela integração offline do
+  scanner; a leitura óptica com câmera física ainda requer validação dedicada.
+
 ## [Redesign visual] — 2026-08-11 — Command Surface
 
 ### Adicionado

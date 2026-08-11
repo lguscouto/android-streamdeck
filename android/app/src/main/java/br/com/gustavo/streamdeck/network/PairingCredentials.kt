@@ -28,10 +28,11 @@ class PairingCredentials private constructor(
             val opaqueAccessToken = accessToken?.takeIf { it.isNotBlank() }
                 ?: return null
             val tlsTrust = runCatching {
-                TlsTrust.fromPem(
-                    caCertificatePem.orEmpty(),
-                    trustCode.orEmpty(),
-                )
+                if (trustCode.isNullOrBlank()) {
+                    TlsTrust.fromVerifiedPem(caCertificatePem.orEmpty())
+                } else {
+                    TlsTrust.fromPem(caCertificatePem.orEmpty(), trustCode)
+                }
             }.getOrNull() ?: return null
             return PairingCredentials(
                 endpoint.httpBaseUrl,

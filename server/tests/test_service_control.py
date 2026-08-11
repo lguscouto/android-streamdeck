@@ -124,3 +124,25 @@ def test_controller_stop_is_idempotent_and_terminates_owned_process() -> None:
     assert process.kill_calls == 0
     assert controller.status is ProcessStatus.STOPPED
     assert controller.stop() is False
+
+
+def test_controller_generates_internal_admin_code_for_child_without_static_code() -> (
+    None
+):
+    calls: list[dict[str, Any]] = []
+
+    def fake_popen(_command: tuple[str, ...], **kwargs: Any) -> FakeProcess:
+        calls.append(kwargs)
+        return FakeProcess()
+
+    controller = ServerProcessController(
+        Settings(require_auth=True),
+        command=("server.exe",),
+        process_factory=fake_popen,
+    )
+
+    controller.start()
+
+    assert len(controller.admin_code) >= 32
+    assert calls[0]["env"]["STREAMDECK_ADMIN_CODE"] == controller.admin_code
+    assert "STREAMDECK_PAIRING_CODE" not in calls[0]["env"]

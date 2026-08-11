@@ -17,7 +17,9 @@ Construir um painel de controle Android para acionar, pela rede local, um conjun
 
 ## Estado atual
 
-As **Fases 1, 2, 3, 4, 5, 6, 7, 8 e 9** estão implementadas no checkout atual.
+As **Fases 1, 2, 3, 4, 5, 6, 7, 8, 9 e 11** estão implementadas no checkout atual.
+O incremento de onboarding e controles essenciais foi validado localmente e no
+E2E HTTPS/WSS do `Pixel_8`, sem commit, push, CI ou release nesta etapa.
 As Fases 1–4 entregam o painel, execução controlada, editor e gestão de
 perfis. A Fase 6 endurece a operação Windows; a Fase 7 adiciona HTTPS/WSS
 remoto, CA privada, bootstrap explícito de confiança, rotação/revogação de
@@ -56,16 +58,18 @@ edge-to-edge).
 - registry interno fechado para ações;
 - primeira hotkey Windows via `keybd_event` e mapa explícito de teclas virtuais;
 - Android valida o `profile_snapshot` e mostra a página ativa em grade configurada
-  por `rows × columns` (perfil de desenvolvimento: 3 colunas × 5 linhas);
+  por `rows × columns` (o perfil built-in atual usa 3 × 3);
 - toque envia somente `request_id`, IDs e revisão; nenhuma hotkey ou comando sai
   do Android;
 - `ack/completed`, `ack/rejected` e `error` atualizam o botão correto como
   `Concluído` ou `Erro`, com bloqueio durante execução;
 - smoke UiAutomator no `Pixel_8` comprovou pareamento, WebSocket, grade, hotkey
   registrada, rejeição segura e reconexão criptografada;
-- a execução de `media`, `text`, `url` e `key` passou a ser feita por adaptadores
-  específicos, fechados e testados na Fase 4; `application` continua rejeitada
-  até receber um adaptador seguro baseado em catálogo permitido.
+- a execução de `media`, `text`, `url`, `key` e `application` usa adaptadores
+  específicos, fechados e testados; `chrome` é resolvido pelo catálogo fixo
+  `chrome → chrome.exe`, e `PRINTSCREEN` mapeia `VK_SNAPSHOT` (`0x2C`);
+- o perfil Spotify usa a sessão multimídia global e declara essa semântica na
+  acessibilidade; não há OAuth ou garantia de exclusividade;
 
 ### Fase 4 — editor, revisões e adaptadores adicionais
 
@@ -85,8 +89,13 @@ limites e comandos de validação.
 
 - bind remoto exige autenticação e HTTPS/WSS, sem fallback claro;
 - CA privada persistente, leaf renovável, SANs explícitos e DACL Windows;
-- código de confiança fora de banda validado pelo Android antes do primeiro
-  request;
+- sessão de pareamento efêmera com senha aleatória, validade de 10 minutos e
+  consumo único;
+- QR `streamdeck://pair/v1` mínimo, estrito e vinculado à mesma sessão;
+- bootstrap TLS temporário com prova HMAC/HKDF derivada da senha; a CA só é
+  instalada no Android depois da prova e antes de qualquer request autenticado;
+- tela Android reduzida a IP, senha temporária e leitura opcional de QR; client
+  ID, porta, CA e código técnico permanecem internos;
 - CA, token, endpoint e identidade Android cifrados no Android Keystore;
 - rotação/revogação de credenciais e invalidação de sessões WebSocket antigas;
 - discovery mDNS opt-in, sem segredos e sem autoridade de confiança;
@@ -122,6 +131,28 @@ configuração remota, bootstrap da CA e os gates reais da fase.
 Consulte [`docs/phase-9-delivery.md`](docs/phase-9-delivery.md) para os gates
 da fase e as decisões registradas.
 
+### Incremento atual — onboarding e controles essenciais
+
+- onboarding versionado em três páginas, com `Pular tutorial`, voltar/próximo,
+  finalização no pareamento existente e replay em Configurações;
+- preferências locais preservam `onboardingVersion`, tema, densidade, háptico e
+  redução de movimento; o replay não toca nas credenciais cifradas;
+- direção visual Command Glow com vetores/tints, bordas de accent, estados
+  executing/completed/rejected e grade row-major 3 × 3;
+- perfil built-in `Controles essenciais`, instalado uma vez sem sobrescrever
+  perfis personalizados: Play/Pause, Próxima, Mute, Spotify, Chrome, Volume +,
+  Volume − e Print Screen, com uma célula vazia;
+- `Chrome` aceita somente `application/chrome` e o servidor resolve `chrome.exe`;
+  Print Screen usa `key/PRINTSCREEN` → `VK_SNAPSHOT`; Spotify atua sobre a sessão
+  multimídia global;
+- gates locais de servidor e Android passam; o E2E HTTPS/WSS e a validação
+  instrumentada final no `Pixel_8` passaram com as três classes esperadas. O
+  release continua unsigned sem keystore autorizado.
+
+O registro verificável desta entrega está em
+[`docs/phase-11-delivery.md`](docs/phase-11-delivery.md); ele separa os gates
+locais já executados, o E2E final aprovado e as limitações que permanecem.
+
 ### Acesso local padrão
 
 - Health: `http://127.0.0.1:8765/health`
@@ -134,10 +165,10 @@ O bind padrão é loopback. Para acesso remoto, use o perfil seguro com HTTPS/WS
 - API remota: `https://<host>:8765/api/v1`;
 - WebSocket remoto: `wss://<host>:8765/api/v1/ws`.
 
-A CA pública e o código de confiança são entregues explicitamente ao Android;
-nenhum anúncio mDNS ou tentativa de conexão substitui essa confirmação. O
-servidor mantém o bind padrão de desenvolvimento em loopback, mas o APK Android
-não aceita HTTP/WS claro.
+A CA pública é enviada somente no bootstrap TLS e só é aceita após a prova
+derivada da senha. Nenhum anúncio mDNS ou tentativa de conexão substitui essa
+autenticação. O servidor mantém o bind padrão de desenvolvimento em loopback,
+mas o APK Android não aceita HTTP/WS claro.
 
 Validação atual do servidor:
 

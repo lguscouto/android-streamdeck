@@ -20,6 +20,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ fun SettingsScreen(
     preferences: StreamDeckPreferences,
     onPreferencesChange: (StreamDeckPreferences) -> Unit,
     onClose: () -> Unit,
+    onShowTutorial: () -> Unit = {},
 ) {
     Column(
         modifier = Modifier
@@ -114,6 +116,16 @@ fun SettingsScreen(
                     onPreferencesChange(preferences.copy(hapticsEnabled = it))
                 },
             )
+        }
+
+        SettingsCard(title = "Ajuda") {
+            Text(
+                "Revise rapidamente como parear o celular e usar os controles iniciais.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            TextButton(onClick = onShowTutorial) {
+                Text("Ver tutorial novamente")
+            }
         }
 
         Surface(

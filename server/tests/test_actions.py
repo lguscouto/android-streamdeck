@@ -5,6 +5,7 @@ import pytest
 from app.actions import (
     ActionExecutionRejected,
     ActionRegistry,
+    RecordingActionExecutor,
     WindowsHotkeyAdapter,
     WindowsKeyAdapter,
     WindowsMediaAdapter,
@@ -29,6 +30,17 @@ class RecordingKeyEmitter:
         self.events.append((virtual_key, key_up))
 
 
+def test_recording_action_executor_records_without_emitting_desktop_input() -> None:
+    executor = RecordingActionExecutor()
+    action = ApplicationAction(type="application", app_id="chrome")
+
+    result = executor.execute(action)
+
+    assert result.status == "completed"
+    assert result.message == "Recorded application/chrome"
+    assert executor.actions == [action]
+
+
 def test_windows_key_adapter_emits_one_allowed_key_without_modifier() -> None:
     emitter = RecordingKeyEmitter()
     adapter = WindowsKeyAdapter(emit_key=emitter)
@@ -39,6 +51,27 @@ def test_windows_key_adapter_emits_one_allowed_key_without_modifier() -> None:
         (0x41, False),  # A down
         (0x41, True),  # A up
     ]
+
+
+def test_windows_key_adapter_emits_printscreen_down_and_up() -> None:
+    emitter = RecordingKeyEmitter()
+    adapter = WindowsKeyAdapter(emit_key=emitter)
+
+    adapter.execute(KeyAction(type="key", key="PRINTSCREEN"))
+
+    assert emitter.events == [
+        (0x2C, False),  # VK_SNAPSHOT down
+        (0x2C, True),  # VK_SNAPSHOT up
+    ]
+
+
+def test_windows_key_adapter_rejects_unknown_named_key() -> None:
+    adapter = WindowsKeyAdapter(emit_key=RecordingKeyEmitter())
+
+    with pytest.raises(ActionExecutionRejected) as error:
+        adapter.execute(KeyAction(type="key", key="NOT_A_REAL_KEY"))
+
+    assert error.value.public_message == "Key is not supported"
 
 
 def test_windows_media_adapter_emits_one_allowed_media_command() -> None:
@@ -157,8 +190,8 @@ def test_action_registry_executes_media_adapter() -> None:
 def test_action_registry_rejects_action_without_an_explicit_adapter() -> None:
     registry = ActionRegistry()
 
-    # The default catalog is empty: an application id that is not registered is
-    # rejected with the adapter's user-facing message.
+    # The default catalog contains only the fixed Chrome entry; an unknown
+    # application id is still rejected with the adapter's user-facing message.
     with pytest.raises(ActionExecutionRejected) as error:
         registry.execute(ApplicationAction(type="application", app_id="not-enabled"))
 

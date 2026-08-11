@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-LATEST_SCHEMA_VERSION = 3
+LATEST_SCHEMA_VERSION = 5
 _REQUIRED_TABLES = frozenset(
     {
         "profiles",
@@ -12,10 +12,18 @@ _REQUIRED_TABLES = frozenset(
         "profile_revisions",
         "paired_clients",
         "paired_client_audit",
+        "builtin_profile_installations",
     }
 )
-_REQUIRED_TABLES_V1 = _REQUIRED_TABLES - {"paired_clients", "paired_client_audit"}
-_REQUIRED_TABLES_V2 = _REQUIRED_TABLES - {"paired_client_audit"}
+_REQUIRED_TABLES_V1 = _REQUIRED_TABLES - {
+    "paired_clients",
+    "paired_client_audit",
+    "builtin_profile_installations",
+}
+_REQUIRED_TABLES_V2 = _REQUIRED_TABLES - {
+    "paired_client_audit",
+    "builtin_profile_installations",
+}
 _REQUIRED_COLUMNS_V2 = {
     "paired_clients": frozenset(
         {"client_id", "client_version", "token_hash", "paired_at", "last_seen_at"}
@@ -46,6 +54,12 @@ _REQUIRED_COLUMNS_V3 = {
             "reason_code",
             "occurred_at",
         }
+    ),
+}
+_REQUIRED_COLUMNS_V5 = {
+    **_REQUIRED_COLUMNS_V3,
+    "builtin_profile_installations": frozenset(
+        {"builtin_id", "version", "installed_at"}
     ),
 }
 
@@ -203,6 +217,64 @@ _SCHEMA_V3_INDEXES = (
     "ON paired_client_audit(client_id, occurred_at DESC, event_id DESC)",
 )
 
+_SCHEMA_V4_PAIRED_CLIENT_AUDIT = """
+CREATE TABLE paired_client_audit_v4 (
+    event_id INTEGER PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    event_type TEXT NOT NULL CHECK (
+        event_type IN ('paired', 'repaired', 'revoked', 'legacy_imported')
+    ),
+    credential_generation INTEGER NOT NULL CHECK (credential_generation >= 1),
+    actor_kind TEXT NOT NULL CHECK (
+        actor_kind IN (
+            'pairing_code', 'pairing_session', 'local_owner', 'self', 'legacy'
+        )
+    ),
+    reason_code TEXT CHECK (
+        reason_code IS NULL OR reason_code IN (
+            'user_request', 'lost_device', 'security', 'replaced'
+        )
+    ),
+    occurred_at TEXT NOT NULL,
+    FOREIGN KEY (client_id) REFERENCES paired_clients(client_id)
+)
+"""
+
+_SCHEMA_V5 = (
+    """
+    CREATE TABLE IF NOT EXISTS builtin_profile_installations (
+        builtin_id TEXT PRIMARY KEY CHECK (length(builtin_id) BETWEEN 1 AND 64),
+        version INTEGER NOT NULL CHECK (version >= 1),
+        installed_at TEXT NOT NULL
+    )
+    """,
+)
+
+
+def _migrate_v4(connection: sqlite3.Connection) -> None:
+    connection.execute("DROP INDEX IF EXISTS ix_paired_client_audit_lookup")
+    connection.execute(_SCHEMA_V4_PAIRED_CLIENT_AUDIT)
+    connection.execute(
+        """
+        INSERT INTO paired_client_audit_v4(
+            event_id, client_id, event_type, credential_generation, actor_kind,
+            reason_code, occurred_at
+        )
+        SELECT
+            event_id, client_id, event_type, credential_generation, actor_kind,
+            reason_code, occurred_at
+        FROM paired_client_audit
+        """
+    )
+    connection.execute("DROP TABLE paired_client_audit")
+    connection.execute(
+        "ALTER TABLE paired_client_audit_v4 RENAME TO paired_client_audit"
+    )
+    connection.execute(
+        "CREATE INDEX ix_paired_client_audit_lookup "
+        "ON paired_client_audit(client_id, occurred_at DESC, event_id DESC)"
+    )
+
 
 def _foreign_keys_enabled(connection: sqlite3.Connection) -> bool:
     return connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
@@ -287,7 +359,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     ):
         raise MigrationError("database schema is incomplete")
     if current_version == LATEST_SCHEMA_VERSION:
-        if not _schema_is_complete(connection, _REQUIRED_TABLES, _REQUIRED_COLUMNS_V3):
+        if not _schema_is_complete(connection, _REQUIRED_TABLES, _REQUIRED_COLUMNS_V5):
             raise MigrationError("database schema is incomplete")
         return
 
@@ -304,6 +376,13 @@ def migrate(connection: sqlite3.Connection) -> None:
         if current_version < 3:
             _migrate_v3(connection)
             connection.execute("PRAGMA user_version = 3")
+        if current_version < 4:
+            _migrate_v4(connection)
+            connection.execute("PRAGMA user_version = 4")
+        if current_version < 5:
+            for statement in _SCHEMA_V5:
+                connection.execute(statement)
+            connection.execute("PRAGMA user_version = 5")
         connection.commit()
     except sqlite3.Error as exc:
         connection.rollback()

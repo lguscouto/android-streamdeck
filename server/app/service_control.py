@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
@@ -63,6 +64,7 @@ class ServerProcessController:
         self._process_factory = process_factory
         self._stop_timeout_seconds = stop_timeout_seconds
         self._process: Any | None = None
+        self._admin_code = settings.admin_code or secrets.token_urlsafe(32)
 
     @staticmethod
     def _default_cwd() -> Path:
@@ -82,6 +84,11 @@ class ServerProcessController:
     @property
     def is_running(self) -> bool:
         return self.status is ProcessStatus.RUNNING
+
+    @property
+    def admin_code(self) -> str:
+        """Return the in-process owner secret without exposing it to logs."""
+        return self._admin_code
 
     def start(self) -> bool:
         """Start the owned server once; return False when it is already running."""
@@ -127,6 +134,7 @@ class ServerProcessController:
         environment["STREAMDECK_HOST"] = self.settings.host
         environment["STREAMDECK_PORT"] = str(self.settings.port)
         environment["STREAMDECK_DATABASE_PATH"] = str(self.settings.database_path)
+        environment["STREAMDECK_ADMIN_CODE"] = self._admin_code
         environment["STREAMDECK_REQUIRE_AUTH"] = (
             "true" if self.settings.require_auth else "false"
         )

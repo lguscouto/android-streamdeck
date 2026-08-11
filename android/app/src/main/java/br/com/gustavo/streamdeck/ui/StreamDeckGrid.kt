@@ -3,7 +3,7 @@ package br.com.gustavo.streamdeck.ui
 import android.graphics.Color as AndroidColor
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -16,16 +16,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Apps
-import androidx.compose.material.icons.outlined.Build
-import androidx.compose.material.icons.outlined.Keyboard
-import androidx.compose.material.icons.automirrored.outlined.MenuBook
-import androidx.compose.material.icons.outlined.MusicNote
-import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,14 +35,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -61,6 +57,7 @@ import br.com.gustavo.streamdeck.ui.theme.CommandColors
 import br.com.gustavo.streamdeck.ui.theme.CommandShapes
 import br.com.gustavo.streamdeck.ui.theme.CommandSpacing
 import br.com.gustavo.streamdeck.ui.settings.DeckDensity
+import br.com.gustavo.streamdeck.ui.icons.CommandIconRegistry
 
 /** Renders the server-defined logical grid as a full-screen command surface. */
 @Composable
@@ -124,9 +121,14 @@ private fun ActionGridButton(
 ) {
     val statusText = executionState.label()
     val hapticFeedback = LocalHapticFeedback.current
+    val accessibleTitle = if (button.icon == "spotify") {
+        stringResource(R.string.spotify_active_session_a11y)
+    } else {
+        button.title
+    }
     val description = stringResource(
         R.string.action_button_description,
-        button.title,
+        accessibleTitle,
         statusText,
     )
     val interactionSource = remember { MutableInteractionSource() }
@@ -140,20 +142,33 @@ private fun ActionGridButton(
     val scale = if (reduceMotion) 1f else animatedScale
     val baseColor = buttonColor(button)
     val containerColor = when (executionState) {
-        ButtonExecutionState.IDLE -> baseColor
-        ButtonExecutionState.EXECUTING -> lerp(baseColor, CommandColors.Pulse, 0.24f)
-        ButtonExecutionState.COMPLETED -> CommandColors.Success
-        ButtonExecutionState.REJECTED -> CommandColors.Danger
+        ButtonExecutionState.IDLE -> MaterialTheme.colorScheme.surfaceVariant
+        ButtonExecutionState.EXECUTING -> lerp(MaterialTheme.colorScheme.surfaceVariant, baseColor, 0.28f)
+        ButtonExecutionState.COMPLETED -> lerp(MaterialTheme.colorScheme.surfaceVariant, CommandColors.Success, 0.32f)
+        ButtonExecutionState.REJECTED -> lerp(MaterialTheme.colorScheme.surfaceVariant, CommandColors.Danger, 0.32f)
     }
     val contentColor = if (containerColor.luminance() > 0.58f) {
         CommandColors.Obsidian
     } else {
         CommandColors.Mist
     }
+    val accentColor = when (executionState) {
+        ButtonExecutionState.IDLE,
+        ButtonExecutionState.EXECUTING,
+        -> baseColor
+        ButtonExecutionState.COMPLETED -> CommandColors.Success
+        ButtonExecutionState.REJECTED -> CommandColors.Danger
+    }
+    val iconColor = if (contrastRatio(accentColor, containerColor) >= 3f) {
+        accentColor
+    } else {
+        contentColor
+    }
 
     Surface(
         modifier = Modifier
             .aspectRatio(1f)
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .graphicsScale(scale)
             .clip(CommandShapes.key)
             .clickable(
@@ -170,11 +185,14 @@ private fun ActionGridButton(
             )
             .semantics {
                 contentDescription = description
+                stateDescription = statusText
+                liveRegion = LiveRegionMode.Polite
                 role = Role.Button
             },
         shape = CommandShapes.key,
         color = containerColor,
         contentColor = contentColor,
+        border = BorderStroke(1.5.dp, accentColor.copy(alpha = if (pressed) 1f else 0.72f)),
         tonalElevation = 2.dp,
         shadowElevation = if (pressed) 0.dp else 3.dp,
     ) {
@@ -187,9 +205,10 @@ private fun ActionGridButton(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Icon(
-                    imageVector = iconFor(button.icon),
+                    imageVector = CommandIconRegistry.iconFor(button.icon),
                     contentDescription = null,
                     modifier = Modifier.size(metrics.iconSize),
+                    tint = iconColor,
                 )
                 Text(
                     text = button.title.ifBlank { "Comando" },
@@ -270,18 +289,17 @@ private fun DeckDensity.metrics(): DeckLayoutMetrics = when (this) {
     )
 }
 
+private fun contrastRatio(foreground: Color, background: Color): Float {
+    val foregroundLuminance = foreground.luminance()
+    val backgroundLuminance = background.luminance()
+    val lighter = maxOf(foregroundLuminance, backgroundLuminance)
+    val darker = minOf(foregroundLuminance, backgroundLuminance)
+    return (lighter + 0.05f) / (darker + 0.05f)
+}
+
 private fun buttonColor(button: StreamDeckButton): Color {
     val parsed = button.color?.let { raw ->
         runCatching { Color(AndroidColor.parseColor(raw)) }.getOrNull()
     }
     return parsed ?: CommandColors.Slate
-}
-
-private fun iconFor(icon: String?): ImageVector = when (icon) {
-    "keyboard" -> Icons.Outlined.Keyboard
-    "play_pause" -> Icons.Outlined.PlayArrow
-    "book" -> Icons.AutoMirrored.Outlined.MenuBook
-    "media" -> Icons.Outlined.MusicNote
-    "application" -> Icons.Outlined.Apps
-    else -> Icons.Outlined.Build
 }

@@ -27,4 +27,25 @@
     <string name="profile_revision">Perfil sincronizado na revisão %1$d</string>
     <string name="a11y_button_selected">Selecionado</string>
     <string name="a11y_button_select">Selecionar botão %1$s</string>
+
+    <string name="onboarding_brand">ANDROID STREAM DECK</string>
+    <string name="onboarding_skip">Pular tutorial</string>
+    <string name="onboarding_back">Voltar</string>
+    <string name="onboarding_next">Próximo</string>
+    <string name="onboarding_start_pairing">Começar pareamento</string>
+    <string name="onboarding_page_indicator">Página %1$d de %2$d</string>
+    <string name="onboarding_page_dot_description">Ir para a página %1$d de %2$d</string>
+    <string name="onboarding_page_one_title">Seu PC, a um toque</string>
+    <string name="onboarding_page_one_description">Controle mídia, volume, aplicativos e capturas direto do celular.</string>
+    <string name="onboarding_page_two_title">Conecte com segurança</string>
+    <string name="onboarding_page_two_description">Use o QR ou informe o IPv4 e a senha temporária exibidos no servidor do PC.</string>
+    <string name="onboarding_page_three_title">Oito controles prontos</string>
+    <string name="onboarding_page_three_description">Comece com uma grade útil e personalize páginas e perfis quando quiser.</string>
+    <string name="onboarding_pairing_step_one">1. Abra o servidor Android Stream Deck no PC.</string>
+    <string name="onboarding_pairing_step_two">2. Escaneie o QR ou digite o IPv4 e a senha temporária.</string>
+    <string name="onboarding_pairing_step_three">3. Aguarde o status Conectado.</string>
+    <string name="onboarding_private_network">Celular e PC devem estar na mesma rede privada.</string>
+    <string name="onboarding_controls_summary">Oito controles: Play/Pause, Próxima, Mute, Spotify, Chrome, Volume +, Volume − e Print Screen.</string>
+    <string name="onboarding_spotify_note">O controle Spotify pausa ou retoma a sessão de mídia ativa; não é exclusivo do aplicativo.</string>
+    <string name="spotify_active_session_a11y">Spotify: reproduzir ou pausar mídia ativa</string>
 </resources>

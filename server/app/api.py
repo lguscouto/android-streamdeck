@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import logging
+import os
+import socket
 from collections.abc import Callable
 from typing import Annotated, Any, Literal, TypeAlias
 
@@ -9,13 +12,19 @@ from fastapi import APIRouter, FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.pairing import (
     PairingCodeInvalidError,
     PairingService,
     PairingUnavailableError,
+)
+from app.pairing_session import (
+    PairingProofInvalidError,
+    PairingSessionExpiredError,
+    PairingSessionManager,
+    PairingSessionUsedError,
 )
 from app.profile_transfer import (
     ProfileTransferError,
@@ -47,21 +56,67 @@ ACTION_TYPES = ("hotkey", "key", "media", "text", "url", "application")
 ACTION_CATALOG = {"actions": [{"type": action_type} for action_type in ACTION_TYPES]}
 LOGGER = logging.getLogger(__name__)
 MAX_PROFILE_IMPORT_BYTES = 512 * 1024
+_RFC1918_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+)
 PairingCode: TypeAlias = Annotated[
     str,
     Field(min_length=6, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$"),
+]
+PairingSessionId: TypeAlias = Annotated[
+    str,
+    Field(min_length=16, max_length=64, pattern=r"^[A-Za-z0-9_-]+$"),
+]
+PairingProof: TypeAlias = Annotated[
+    str,
+    Field(min_length=32, max_length=128, pattern=r"^[A-Za-z0-9_-]+$"),
 ]
 
 
 class PairingClaimRequest(StrictModel):
     client_id: StableId
     client_version: VersionString
-    pairing_code: PairingCode
+    session_id: PairingSessionId | None = None
+    client_proof: PairingProof | None = None
+    pairing_code: PairingCode | None = None
+
+    @model_validator(mode="after")
+    def require_one_claim_mode(self) -> PairingClaimRequest:
+        session_mode = self.session_id is not None or self.client_proof is not None
+        static_mode = self.pairing_code is not None
+        if session_mode and (
+            self.session_id is None or self.client_proof is None or static_mode
+        ):
+            raise ValueError("session claim requires session_id and client_proof")
+        if not session_mode and not static_mode:
+            raise ValueError("pairing claim credentials are required")
+        return self
 
 
 class PairingClaimResponse(StrictModel):
     client_id: StableId
     access_token: AccessToken
+
+
+class PairingBootstrapResponse(StrictModel):
+    version: Literal[1]
+    session_id: PairingSessionId
+    salt: Annotated[str, Field(min_length=16, max_length=64)]
+    expires_at: Annotated[str, Field(min_length=20, max_length=40)]
+    server_ip: Annotated[str, Field(min_length=7, max_length=15)]
+    port: int = Field(ge=1, le=65535)
+    ca_certificate_pem: Annotated[str, Field(min_length=1, max_length=65536)]
+    server_proof: PairingProof
+
+
+class PairingSessionResponse(StrictModel):
+    session_id: PairingSessionId
+    pairing_code: PairingCode
+    expires_at: Annotated[str, Field(min_length=20, max_length=40)]
+    server_ip: Annotated[str, Field(min_length=7, max_length=15)]
+    port: int = Field(ge=1, le=65535)
+    qr_uri: Annotated[str, Field(min_length=1, max_length=512)]
 
 
 class DeviceRevocationRequest(StrictModel):
@@ -260,6 +315,42 @@ def _require_device_admin(
     limiter.reset(origin)
 
 
+def _is_loopback_request(request: Request) -> bool:
+    try:
+        return ipaddress.ip_address(_request_origin(request)).is_loopback
+    except ValueError:
+        return False
+
+
+def _resolve_pairing_server_ip(settings: Any) -> str:
+    candidates = [
+        os.getenv("STREAMDECK_PAIRING_SERVER_IP"),
+        *(getattr(settings, "tls_identities", ()) or ()),
+        getattr(settings, "host", None),
+    ]
+    try:
+        candidates.append(socket.gethostbyname(socket.gethostname()))
+    except OSError:
+        pass
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            address = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if address.version == 4 and any(
+            address in network for network in _RFC1918_NETWORKS
+        ):
+            return str(address)
+    raise APIError(
+        503,
+        "PAIRING_SERVER_ADDRESS_UNAVAILABLE",
+        "A private server address is unavailable",
+        True,
+    )
+
+
 async def _invalidate_client_sessions(
     websocket_manager: Any,
     client_id: str,
@@ -282,11 +373,15 @@ def create_router(
     repository: ProfileRepository,
     websocket_manager: Any = None,
     pairing_service: PairingService | None = None,
+    pairing_session_manager: PairingSessionManager | None = None,
+    ca_certificate_pem: str | None = None,
+    pairing_server_ip: str | None = None,
     require_auth: bool = False,
     admin_code: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=API_PREFIX, tags=["profiles"])
     pairing_attempt_limiter = AttemptRateLimiter()
+    pairing_bootstrap_limiter = AttemptRateLimiter()
     device_admin_attempt_limiter = AttemptRateLimiter()
 
     async def broadcast_event(
@@ -657,6 +752,99 @@ def create_router(
         device = next(device for device in updated if device["client_id"] == client_id)
         return JSONResponse(content={"device": device})
 
+    @router.get("/pairing/bootstrap")
+    def pairing_bootstrap(
+        request: Request,
+        session_id: PairingSessionId,
+    ) -> JSONResponse:
+        if pairing_session_manager is None:
+            raise APIError(
+                503,
+                "PAIRING_UNAVAILABLE",
+                "Pairing is unavailable",
+                True,
+            )
+        origin = _request_origin(request)
+        if not pairing_bootstrap_limiter.allow(origin):
+            raise APIError(
+                429,
+                "PAIRING_RATE_LIMITED",
+                "Too many pairing attempts",
+                True,
+            )
+        try:
+            bundle = pairing_session_manager.bootstrap(session_id)
+        except PairingSessionUsedError:
+            raise APIError(
+                409,
+                "PAIRING_USED",
+                "Pairing session was already used",
+                False,
+            ) from None
+        except PairingSessionExpiredError:
+            raise APIError(
+                410,
+                "PAIRING_EXPIRED",
+                "Pairing session expired",
+                False,
+            ) from None
+        pairing_bootstrap_limiter.reset(origin)
+        response = PairingBootstrapResponse(
+            version=bundle.version,
+            session_id=bundle.session_id,
+            salt=bundle.salt,
+            expires_at=bundle.expires_at,
+            server_ip=bundle.server_ip,
+            port=bundle.port,
+            ca_certificate_pem=bundle.ca_certificate_pem,
+            server_proof=bundle.server_proof,
+        )
+        return JSONResponse(
+            content=response.to_wire(),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @router.post("/local/pairing-session")
+    def create_local_pairing_session(request: Request) -> JSONResponse:
+        if not _is_loopback_request(request):
+            raise APIError(
+                403,
+                "LOCAL_ONLY",
+                "Pairing session creation is local-only",
+                False,
+            )
+        _require_device_admin(request, admin_code, device_admin_attempt_limiter)
+        if pairing_session_manager is None or not ca_certificate_pem:
+            raise APIError(
+                503,
+                "PAIRING_UNAVAILABLE",
+                "Pairing is unavailable",
+                True,
+            )
+        server_ip = pairing_server_ip or _resolve_pairing_server_ip(
+            request.app.state.settings
+        )
+        try:
+            presentation = pairing_session_manager.create_session(
+                server_ip=server_ip,
+                port=request.app.state.settings.port,
+                ca_certificate_pem=ca_certificate_pem,
+            )
+        except ValueError as exc:
+            raise _internal_error() from exc
+        response = PairingSessionResponse(
+            session_id=presentation.session_id,
+            pairing_code=presentation.pairing_code,
+            expires_at=presentation.expires_at,
+            server_ip=presentation.server_ip,
+            port=presentation.port,
+            qr_uri=presentation.qr_uri,
+        )
+        return JSONResponse(
+            content=response.to_wire(),
+            headers={"Cache-Control": "no-store"},
+        )
+
     @router.post("/pairing/claim")
     async def claim_pairing(
         request: Request,
@@ -678,12 +866,50 @@ def create_router(
                 True,
             )
         try:
-            token = await run_in_threadpool(
-                pairing_service.claim_token,
-                payload.client_id,
-                payload.client_version,
-                payload.pairing_code,
-            )
+            if payload.session_id is not None and payload.client_proof is not None:
+                if pairing_session_manager is None:
+                    raise PairingUnavailableError("pairing is not configured")
+                await run_in_threadpool(
+                    pairing_session_manager.claim,
+                    session_id=payload.session_id,
+                    client_id=payload.client_id,
+                    client_version=payload.client_version,
+                    client_proof=payload.client_proof,
+                )
+                token = await run_in_threadpool(
+                    pairing_service.issue_token,
+                    payload.client_id,
+                    payload.client_version,
+                    actor_kind="pairing_session",
+                )
+            else:
+                token = await run_in_threadpool(
+                    pairing_service.claim_token,
+                    payload.client_id,
+                    payload.client_version,
+                    payload.pairing_code,
+                )
+        except PairingProofInvalidError:
+            raise APIError(
+                401,
+                "PAIRING_INVALID",
+                "Pairing proof is invalid",
+                False,
+            ) from None
+        except PairingSessionUsedError:
+            raise APIError(
+                409,
+                "PAIRING_USED",
+                "Pairing session was already used",
+                False,
+            ) from None
+        except PairingSessionExpiredError:
+            raise APIError(
+                410,
+                "PAIRING_EXPIRED",
+                "Pairing session expired",
+                False,
+            ) from None
         except PairingCodeInvalidError:
             raise APIError(
                 401,
