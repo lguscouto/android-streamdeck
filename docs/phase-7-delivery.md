@@ -64,6 +64,12 @@ STREAMDECK_TLS_IDENTITIES=192.168.1.44
 STREAMDECK_DISCOVERY_ENABLED=false
 ```
 
+Com um IPv4 RFC1918 concreto em `STREAMDECK_HOST`, o runner abre dois sockets
+explícitos na mesma porta: o IPv4 configurado para HTTPS/WSS do Android e
+`127.0.0.1` para a administração local do tray. O endereço divulgado e o SAN do
+Android continuam sendo o IPv4 privado; a rota `LOCAL_ONLY` permanece
+inacessível pela rede. Nenhuma outra interface é adicionada implicitamente.
+
 O servidor gera ou valida a CA e o leaf nesse diretório. A janela local gera uma
 senha temporária aleatória e o QR correspondente; não copie `ca-key.pem`,
 `leaf-key.pem`, tokens ou o banco para o telefone. A CA pública do bundle só é

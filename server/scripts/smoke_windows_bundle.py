@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import re
 import socket
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -13,6 +16,131 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACT = ROOT / "dist" / "streamdeck-server.exe"
 TRAY_ARTIFACT = ROOT / "dist" / "streamdeck-tray.exe"
+
+
+def _taskkill_command(pid: int) -> list[str]:
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    return [
+        str(Path(system_root) / "System32" / "taskkill.exe"),
+        "/PID",
+        str(pid),
+        "/T",
+        "/F",
+    ]
+
+
+GPU_ACK_PATTERN = re.compile(
+    r"^GPU: (?:N/A|-?\d{1,3}°C) \| VRAM: "
+    r"(?:N/A|\d+(?:\.\d)?/\d+(?:\.\d)? GB \(\d{1,3}%\))$"
+)
+
+
+def _is_gpu_ack_message(message: object) -> bool:
+    return isinstance(message, str) and GPU_ACK_PATTERN.fullmatch(message) is not None
+
+
+def _assert_bundle_contents() -> None:
+    """Check the frozen archive, not just the process health endpoint."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "PyInstaller.utils.cliutils.archive_viewer",
+            "-r",
+            "-b",
+            "-l",
+            str(ARTIFACT),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        shell=False,
+    )
+    listing = result.stdout.casefold()
+    required = (
+        "third-party-notices.md",
+        "licenses\\mpl-2.0.txt",
+        "licenses\\third-party-dotnet.md",
+        "app\\native\\streamdeck_gpu_bridge.dll",
+        "app\\native\\librehardwaremonitorlib.dll",
+        "monoposixhelper.dll",
+        "libmonoposixhelper.dll",
+        "pynvml",
+    )
+    missing = [item for item in required if item not in listing]
+    if missing:
+        raise RuntimeError("frozen bundle is missing: " + ", ".join(missing))
+
+
+async def _smoke_gpu_websocket(port: int) -> str:
+    """Press the built-in GPU button through the public WebSocket contract."""
+    import websockets
+
+    endpoint = f"ws://127.0.0.1:{port}/api/v1/ws"
+    async with websockets.connect(
+        endpoint, open_timeout=10, close_timeout=5
+    ) as websocket:
+        await websocket.send(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "type": "hello",
+                    "payload": {
+                        "client_id": "windows-bundle-smoke",
+                        "client_version": "0.1.0",
+                        "supported_protocol_versions": [1],
+                    },
+                }
+            )
+        )
+        welcome = json.loads(await websocket.recv())
+        snapshot = json.loads(await websocket.recv())
+        if (
+            welcome.get("type") != "welcome"
+            or snapshot.get("type") != "profile_snapshot"
+        ):
+            raise RuntimeError(
+                "bundled WebSocket handshake returned an unexpected message"
+            )
+
+        profile = snapshot["payload"]["profile"]
+        gpu_button = next(
+            (
+                button
+                for page in profile["pages"]
+                for button in page["buttons"]
+                if button.get("id") == "system-gpu"
+            ),
+            None,
+        )
+        if gpu_button is None:
+            raise RuntimeError("bundled profile does not contain the system-gpu button")
+
+        await websocket.send(
+            json.dumps(
+                {
+                    "protocol_version": 1,
+                    "type": "press",
+                    "payload": {
+                        "request_id": "windows-bundle-gpu",
+                        "profile_id": profile["id"],
+                        "page_id": profile["active_page_id"],
+                        "button_id": gpu_button["id"],
+                        "revision": profile["revision"],
+                    },
+                }
+            )
+        )
+        acknowledgement = json.loads(await websocket.recv())
+        payload = acknowledgement.get("payload", {})
+        if acknowledgement.get("type") != "ack" or payload.get("status") != "completed":
+            raise RuntimeError(
+                f"bundled GPU press was not completed: {acknowledgement}"
+            )
+        message = payload.get("message")
+        if not _is_gpu_ack_message(message):
+            raise RuntimeError("bundled GPU ACK did not match the public grammar")
+        return str(message)
 
 
 def _free_loopback_port() -> int:
@@ -70,11 +198,16 @@ def _http_json(
 
 
 def _assert_port_released(port: int) -> None:
-    try:
-        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-            raise RuntimeError("bundled server left the smoke port listening")
-    except OSError:
-        return
+    deadline = time.monotonic() + 10.0
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                last_error = RuntimeError("port is still accepting connections")
+        except OSError:
+            return
+        time.sleep(0.25)
+    raise RuntimeError("bundled server left the smoke port listening") from last_error
 
 
 def _stop_owned_process(process: subprocess.Popen[bytes]) -> None:
@@ -82,7 +215,7 @@ def _stop_owned_process(process: subprocess.Popen[bytes]) -> None:
         return
     if os.name == "nt":
         subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            _taskkill_command(process.pid),
             check=False,
             close_fds=True,
             shell=False,
@@ -209,6 +342,7 @@ def _smoke_tray_bundle() -> None:
 def main() -> None:
     if not ARTIFACT.is_file():
         raise FileNotFoundError(f"build artifact not found: {ARTIFACT.name}")
+    _assert_bundle_contents()
 
     base = f"http://127.0.0.1:{_free_loopback_port()}"
     port = int(base.rsplit(":", 1)[1])
@@ -268,6 +402,7 @@ def main() -> None:
                 )
             if imported.get("id") != "smoke-import" or imported.get("revision") != 1:
                 raise RuntimeError("bundled import returned unexpected profile state")
+            gpu_message = asyncio.run(_smoke_gpu_websocket(port))
         finally:
             _stop_owned_process(process)
 
@@ -277,8 +412,8 @@ def main() -> None:
         raise RuntimeError("bundled smoke left the temporary runtime directory")
 
     print(
-        "health={status}; export=ok; import=ok; port_released=true; "
-        "temporary_state_removed=true".format(status=health["status"])
+        "health={status}; export=ok; import=ok; gpu={gpu}; port_released=true; "
+        "temporary_state_removed=true".format(status=health["status"], gpu=gpu_message)
     )
     _smoke_tray_bundle()
     print("tray=ok; no_exception_dialog=true; temporary_state_removed=true")

@@ -205,6 +205,9 @@ fun ProfileEditorScreen(
                             "volume_up" to "Volume +",
                             "volume_down" to "Volume −",
                             "screenshot" to "Print Screen",
+                            "cpu" to "CPU",
+                            "memory" to "Memória",
+                            "gpu" to "GPU e VRAM",
                             "keyboard" to "Teclado",
                             "book" to "Painel",
                             "media" to "Mídia",
@@ -345,6 +348,22 @@ fun ProfileEditorScreen(
                         enabled = !saving,
                         onValueChange = { onDraftChange(draft.copy(actionValue = it)) },
                     )
+                    EditorActionType.SYSTEM_INFO -> {
+                        val systemInfoTargetLabel = systemInfoTargetLabel(draft.actionValue)
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                val targets = listOf("cpu", "memory", "gpu")
+                                val currentIndex = targets.indexOf(draft.actionValue)
+                                    .coerceAtLeast(0)
+                                val nextTarget = targets[(currentIndex + 1) % targets.size]
+                                onDraftChange(draft.copy(actionValue = nextTarget))
+                            },
+                            enabled = !saving,
+                        ) {
+                            Text("Métrica: $systemInfoTargetLabel")
+                        }
+                    }
                 }
             }
 
@@ -559,6 +578,14 @@ private fun actionTypeLabel(type: EditorActionType): String = when (type) {
     EditorActionType.TEXT -> "Texto"
     EditorActionType.URL -> "URL HTTPS"
     EditorActionType.APPLICATION -> "Aplicativo"
+    EditorActionType.SYSTEM_INFO -> "Telemetria do sistema"
+}
+
+private fun systemInfoTargetLabel(target: String): String = when (target) {
+    "cpu" -> "CPU e temperatura"
+    "memory" -> "Memória RAM"
+    "gpu" -> "GPU e VRAM"
+    else -> target
 }
 
 private fun mediaCommandLabel(command: String): String = when (command) {

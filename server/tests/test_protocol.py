@@ -136,6 +136,46 @@ def test_unknown_action_type_is_rejected() -> None:
         Profile.model_validate(profile)
 
 
+def test_system_info_action_is_accepted_by_runtime_and_shared_schema() -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {
+        "type": "system_info",
+        "target": "cpu",
+    }
+
+    parsed = Profile.model_validate(profile)
+
+    assert parsed.pages[0].buttons[0].action.type == "system_info"
+    assert parsed.pages[0].buttons[0].action.target == "cpu"
+    assert not list(profile_schema_validator().iter_errors(profile))
+
+
+def test_system_info_gpu_target_is_accepted_by_runtime_and_shared_schema() -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {
+        "type": "system_info",
+        "target": "gpu",
+    }
+
+    parsed = Profile.model_validate(profile)
+
+    assert parsed.pages[0].buttons[0].action.type == "system_info"
+    assert parsed.pages[0].buttons[0].action.target == "gpu"
+    assert not list(profile_schema_validator().iter_errors(profile))
+
+
+def test_system_info_action_rejects_unknown_target() -> None:
+    profile = profile_with_single_button()
+    profile["pages"][0]["buttons"][0]["action"] = {
+        "type": "system_info",
+        "target": "disk",
+    }
+
+    with pytest.raises(ValidationError):
+        Profile.model_validate(profile)
+    assert list(profile_schema_validator().iter_errors(profile))
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

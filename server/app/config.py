@@ -24,6 +24,7 @@ _RFC1918_NETWORKS = (
     IPv4Network("172.16.0.0/12"),
     IPv4Network("192.168.0.0/16"),
 )
+_WILDCARD_HOST = str(IPv4Address(0))
 
 
 def default_database_path() -> Path:
@@ -64,6 +65,48 @@ def _is_rfc1918_ipv4_host(host: str) -> bool:
     except AddressValueError:
         return False
     return any(address in network for network in _RFC1918_NETWORKS)
+
+
+def resolve_pairing_server_ip(
+    settings: "Settings",
+    *,
+    override: str | None = None,
+) -> str | None:
+    """Resolve a LAN address that is guaranteed to be covered by the leaf SAN."""
+    identity_ips: list[str] = []
+    for identity in settings.tls_identities:
+        try:
+            address = IPv4Address(identity)
+        except (AddressValueError, TypeError, ValueError):
+            continue
+        normalized = str(address)
+        if _is_rfc1918_ipv4_host(normalized) and normalized not in identity_ips:
+            identity_ips.append(normalized)
+
+    try:
+        configured_address = IPv4Address(settings.host.strip())
+    except (AddressValueError, AttributeError, TypeError, ValueError):
+        configured_address = None
+
+    if configured_address is not None and _is_rfc1918_ipv4_host(
+        str(configured_address)
+    ):
+        configured_ip = str(configured_address)
+        return configured_ip if configured_ip in identity_ips else None
+
+    if configured_address is None or not configured_address.is_unspecified:
+        return None
+
+    for candidate in (override, os.getenv("STREAMDECK_PAIRING_SERVER_IP")):
+        if not candidate:
+            continue
+        try:
+            candidate_ip = str(IPv4Address(candidate.strip()))
+        except (AddressValueError, AttributeError, TypeError, ValueError):
+            continue
+        if candidate_ip in identity_ips:
+            return candidate_ip
+    return identity_ips[0] if identity_ips else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,10 +160,12 @@ class Settings:
         raw_identities = tuple(
             dict.fromkeys(identity.strip() for identity in self.tls_identities)
         )
-        if self.tls_required and not raw_identities:
+        if self.tls_required:
             if _is_rfc1918_ipv4_host(self.host):
-                raw_identities = (self.host.strip(),)
-            else:
+                raw_identities = tuple(
+                    dict.fromkeys((*raw_identities, self.host.strip()))
+                )
+            elif not raw_identities:
                 raise ValueError("TLS requires explicit identities for this bind")
         identities = normalize_tls_identities(raw_identities) if raw_identities else ()
         object.__setattr__(self, "tls_identities", identities)
@@ -131,6 +176,22 @@ class Settings:
         normalized_host = self.host.strip().lower()
         return self.tls_mode == "required" or (
             self.tls_mode == "auto" and normalized_host not in _LOOPBACK_HOSTS
+        )
+
+    @property
+    def server_bind_hosts(self) -> tuple[str, ...]:
+        """Expose an owner-only loopback socket beside a concrete LAN bind."""
+        host = self.host.strip()
+        if _is_rfc1918_ipv4_host(host):
+            return (host, "127.0.0.1")
+        return (host,)
+
+    @property
+    def local_pairing_supported(self) -> bool:
+        """Whether the tray's fixed loopback administration endpoint is reachable."""
+        normalized_host = self.host.strip().lower()
+        return self.tls_required and (
+            _is_rfc1918_ipv4_host(self.host) or normalized_host == _WILDCARD_HOST
         )
 
     @classmethod

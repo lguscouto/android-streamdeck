@@ -8,7 +8,9 @@ import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.DeveloperBoard
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MusicNote
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -37,6 +39,9 @@ object CommandIconRegistry {
         "book" -> Icons.AutoMirrored.Outlined.MenuBook
         "media" -> Icons.Outlined.MusicNote
         "application" -> Icons.Outlined.Apps
+        "cpu" -> Icons.Outlined.DeveloperBoard
+        "memory" -> Icons.Outlined.Memory
+        "gpu" -> Icons.Outlined.DeveloperBoard
         else -> Icons.Outlined.Build
     }
 }

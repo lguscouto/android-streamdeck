@@ -160,6 +160,9 @@
         },
         {
           "$ref": "#/$defs/applicationAction"
+        },
+        {
+          "$ref": "#/$defs/systemInfoAction"
         }
       ]
     },
@@ -287,6 +290,27 @@
         "app_id": {
           "$ref": "#/$defs/stableId",
           "description": "ID logico de uma aplicacao registrada no servidor; nao e um caminho."
+        }
+      }
+    },
+    "systemInfoAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "target"
+      ],
+      "properties": {
+        "type": {
+          "const": "system_info"
+        },
+        "target": {
+          "type": "string",
+          "enum": [
+            "cpu",
+            "memory",
+            "gpu"
+          ]
         }
       }
     }

@@ -7,6 +7,7 @@ import br.com.gustavo.streamdeck.network.StreamDeckKeyAction
 import br.com.gustavo.streamdeck.network.StreamDeckMediaAction
 import br.com.gustavo.streamdeck.network.StreamDeckPage
 import br.com.gustavo.streamdeck.network.StreamDeckProfileSnapshot
+import br.com.gustavo.streamdeck.network.StreamDeckSystemInfoAction
 import br.com.gustavo.streamdeck.network.StreamDeckTextAction
 import br.com.gustavo.streamdeck.network.StreamDeckUrlAction
 import org.junit.Assert.assertEquals
@@ -62,6 +63,55 @@ class ProfileEditorDraftTest {
         val restored = ProfileEditorDraft.from(original).applyTo(original)
         assertEquals(original, restored)
         assertNotEquals(original.profileName, editedDraft.applyTo(original).profileName)
+    }
+
+    @Test
+    fun `preserva uma acao de telemetria ao editar o botao`() {
+        val original = sampleSnapshot().let { snapshot ->
+            val button = snapshot.activePage.buttons.first().copy(
+                action = StreamDeckSystemInfoAction("memory"),
+            )
+            snapshot.copy(
+                activePage = snapshot.activePage.copy(
+                    buttons = listOf(button) + snapshot.activePage.buttons.drop(1),
+                ),
+            )
+        }
+
+        val draft = ProfileEditorDraft.from(original)
+        val updated = draft.applyTo(original)
+
+        assertEquals(EditorActionType.SYSTEM_INFO, draft.actionType)
+        assertEquals("memory", draft.actionValue)
+        assertEquals(
+            StreamDeckSystemInfoAction("memory"),
+            updated.activePage.buttons.first().action,
+        )
+    }
+
+    @Test
+    fun `preserva e aplica acao de gpu no editor`() {
+        val original = sampleSnapshot().let { snapshot ->
+            snapshot.copy(
+                activePage = snapshot.activePage.copy(
+                    buttons = listOf(
+                        snapshot.activePage.buttons.first().copy(
+                            action = StreamDeckSystemInfoAction("gpu"),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        val draft = ProfileEditorDraft.from(original)
+        val updated = draft.applyTo(original)
+
+        assertEquals(EditorActionType.SYSTEM_INFO, draft.actionType)
+        assertEquals("gpu", draft.actionValue)
+        assertEquals(
+            StreamDeckSystemInfoAction("gpu"),
+            updated.activePage.buttons.first().action,
+        )
     }
 
     private fun sampleSnapshot(): StreamDeckProfileSnapshot {

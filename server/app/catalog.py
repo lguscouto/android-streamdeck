@@ -13,8 +13,9 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 
-# Executables are Windows binaries (optional .exe) or commands on PATH. Path
-# separators/`..`/drive letters are rejected at the boundary.
+# Catalog entries are bare names at the data boundary so they cannot contain a
+# client-supplied path. The Windows launcher resolves them only to a fixed,
+# existing absolute path before invoking ShellExecuteW.
 _EXECUTABLE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._+\-]*(?:\.exe)?$", re.ASCII)
 
 

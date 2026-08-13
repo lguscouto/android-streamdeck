@@ -10,7 +10,7 @@
       "title": "Principal",
       "order": 0,
       "rows": 3,
-      "columns": 3,
+      "columns": 4,
       "buttons": [
         {
           "id": "media-play-pause",
@@ -85,6 +85,18 @@
           }
         },
         {
+          "id": "system-gpu",
+          "row": 1,
+          "column": 3,
+          "title": "GPU & VRAM",
+          "icon": "gpu",
+          "color": "#8B5CF6",
+          "action": {
+            "type": "system_info",
+            "target": "gpu"
+          }
+        },
+        {
           "id": "volume-down",
           "row": 2,
           "column": 0,
@@ -106,6 +118,30 @@
           "action": {
             "type": "key",
             "key": "PRINTSCREEN"
+          }
+        },
+        {
+          "id": "system-cpu",
+          "row": 2,
+          "column": 2,
+          "title": "CPU & Temp",
+          "icon": "cpu",
+          "color": "#5AA7FF",
+          "action": {
+            "type": "system_info",
+            "target": "cpu"
+          }
+        },
+        {
+          "id": "system-memory",
+          "row": 2,
+          "column": 3,
+          "title": "Memória",
+          "icon": "memory",
+          "color": "#38D9C5",
+          "action": {
+            "type": "system_info",
+            "target": "memory"
           }
         }
       ]

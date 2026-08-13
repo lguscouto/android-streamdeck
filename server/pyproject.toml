@@ -14,6 +14,8 @@ dependencies = [
     "referencing>=0.36,<1.0",
     "uvicorn[standard]>=0.35,<1.0",
     "zeroconf>=0.136,<1.0",
+    "pywin32>=312,<313; sys_platform == 'win32'",
+    "nvidia-ml-py>=13.610,<14; sys_platform == 'win32'",
 ]
 
 [project.scripts]
@@ -28,6 +30,7 @@ dev = [
     "pyinstaller>=6.13,<7.0",
     "pytest>=9.0,<10.0",
     "ruff>=0.12,<1.0",
+    "websockets>=15,<16",
 ]
 
 [tool.uv]

@@ -180,6 +180,68 @@ def test_websocket_valid_press_executes_once_and_caches_completed_ack(
     assert len(action_executor.actions) == 1
 
 
+def test_websocket_system_info_press_returns_safe_telemetry_ack(tmp_path: Path) -> None:
+    from app.actions import ActionRegistry
+    from app.schemas import SystemInfoAction
+
+    class FixedSystemInfoAdapter:
+        def __init__(self) -> None:
+            self.actions: list[SystemInfoAction] = []
+
+        def execute(self, action: SystemInfoAction) -> str:
+            self.actions.append(action)
+            return "RAM: 47% (8.5/16.0 GB)"
+
+    repository = make_repository(tmp_path)
+    profile = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
+    profile["pages"][0]["buttons"][0]["action"] = {
+        "type": "system_info",
+        "target": "memory",
+    }
+    repository.seed_profile(profile)
+    system_info_adapter = FixedSystemInfoAdapter()
+    manager = WebSocketManager(
+        repository,
+        action_executor=ActionRegistry(system_info_adapter=system_info_adapter),
+    )
+    app = create_app(
+        Settings(database_path=tmp_path / "unused.sqlite3"),
+        repository=repository,
+        websocket_manager=manager,
+    )
+    press = {
+        "protocol_version": 1,
+        "type": "press",
+        "payload": {
+            "request_id": "system-memory-1",
+            "profile_id": "default",
+            "page_id": "main",
+            "button_id": "save-shortcut",
+            "revision": 1,
+        },
+    }
+
+    with TestClient(app).websocket_connect("/api/v1/ws") as websocket:
+        websocket.send_json(hello_message())
+        websocket.receive_json()
+        websocket.receive_json()
+        websocket.send_json(press)
+        response = websocket.receive_json()
+
+    assert response == {
+        "protocol_version": 1,
+        "type": "ack",
+        "payload": {
+            "request_id": "system-memory-1",
+            "status": "completed",
+            "message": "RAM: 47% (8.5/16.0 GB)",
+        },
+    }
+    assert system_info_adapter.actions == [
+        SystemInfoAction(type="system_info", target="memory")
+    ]
+
+
 def test_websocket_action_rejection_is_sanitized_and_cached(tmp_path: Path) -> None:
     from app.actions import ActionExecutionRejected
 

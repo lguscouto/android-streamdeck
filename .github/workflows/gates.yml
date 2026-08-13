@@ -46,7 +46,7 @@ jobs:
       - name: Bandit security scan (medium+)
         run: uv run --no-sync bandit -q -ll -r app scripts
       - name: pip-audit dependency vulnerabilities
-        run: uv run --no-sync pip-audit
+        run: uv run --no-sync pip-audit --local --skip-editable --progress-spinner off
       - name: Gitleaks secret scan
         run: |
           set -euo pipefail
@@ -127,6 +127,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
+      - name: Setup .NET 8 SDK for AMD bridge
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
       - name: Sync locked dependencies
         run: uv sync --locked
       - name: Build PyInstaller bundle

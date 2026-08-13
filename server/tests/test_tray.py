@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.tray import TrayApplication
+import pytest
+
+from app.config import Settings
+from app.tray import TrayApplication, TrayUnavailableError
 
 
 @dataclass
@@ -118,3 +121,180 @@ def test_tray_menu_opens_local_pairing_window() -> None:
     pairing_item.callback(icon, pairing_item)
 
     assert window.opens == 1
+
+
+def test_tray_rejects_pairing_when_bind_has_no_loopback_access() -> None:
+    controller = FakeController()
+    controller.settings = Settings(
+        host="streamdeck.local",
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("streamdeck.local",),
+    )
+    tray = TrayApplication(controller)
+
+    with pytest.raises(TrayUnavailableError, match="loopback access"):
+        tray._default_pairing_window()
+
+
+def test_tray_uses_configured_private_bind_host_for_pairing(monkeypatch) -> None:
+    class CapturingPairingWindow:
+        def __init__(self, _controller, *, host, port, ca_certificate_path) -> None:
+            self.host = host
+            self.port = port
+            self.ca_certificate_path = ca_certificate_path
+
+    monkeypatch.delenv("STREAMDECK_PAIRING_SERVER_IP", raising=False)
+    monkeypatch.setattr(
+        "app.pairing_window.PairingWindow",
+        CapturingPairingWindow,
+    )
+    controller = FakeController()
+    controller.settings = Settings(
+        host="192.168.100.20",
+        port=8765,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("192.168.100.21", "deck.example.test"),
+    )
+
+    window = TrayApplication(controller)._default_pairing_window()
+
+    assert window.host == "192.168.100.20"
+
+
+def test_tray_ignores_override_for_concrete_bind_host(monkeypatch) -> None:
+    class CapturingPairingWindow:
+        def __init__(self, _controller, *, host, port, ca_certificate_path) -> None:
+            self.host = host
+            self.port = port
+            self.ca_certificate_path = ca_certificate_path
+
+    monkeypatch.setenv("STREAMDECK_PAIRING_SERVER_IP", "192.168.100.21")
+    monkeypatch.setattr(
+        "app.pairing_window.PairingWindow",
+        CapturingPairingWindow,
+    )
+    controller = FakeController()
+    controller.settings = Settings(
+        host="192.168.100.20",
+        port=8765,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("192.168.100.20",),
+    )
+
+    window = TrayApplication(controller)._default_pairing_window()
+
+    assert window.host == "192.168.100.20"
+
+
+def test_tray_uses_private_identity_for_wildcard_emulator_bind(monkeypatch) -> None:
+    class CapturingPairingWindow:
+        def __init__(self, _controller, *, host, port, ca_certificate_path) -> None:
+            self.host = host
+            self.port = port
+            self.ca_certificate_path = ca_certificate_path
+
+    monkeypatch.delenv("STREAMDECK_PAIRING_SERVER_IP", raising=False)
+    monkeypatch.setattr(
+        "app.pairing_window.PairingWindow",
+        CapturingPairingWindow,
+    )
+    controller = FakeController()
+    controller.settings = Settings(
+        host="0.0.0.0",
+        port=8765,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("10.0.2.2", "localhost"),
+    )
+
+    window = TrayApplication(controller)._default_pairing_window()
+
+    assert window.host == "10.0.2.2"
+
+
+def test_tray_uses_san_covered_wildcard_override(monkeypatch) -> None:
+    class CapturingPairingWindow:
+        def __init__(self, _controller, *, host, port, ca_certificate_path) -> None:
+            self.host = host
+            self.port = port
+            self.ca_certificate_path = ca_certificate_path
+
+    monkeypatch.setenv("STREAMDECK_PAIRING_SERVER_IP", "192.168.100.250")
+    monkeypatch.setattr(
+        "app.pairing_window.PairingWindow",
+        CapturingPairingWindow,
+    )
+    controller = FakeController()
+    controller.settings = Settings(
+        host="0.0.0.0",
+        port=8765,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("10.0.2.2", "192.168.100.250"),
+    )
+
+    window = TrayApplication(controller)._default_pairing_window()
+
+    assert window.host == "192.168.100.250"
+
+
+def test_tray_ignores_wildcard_override_outside_tls_san(monkeypatch) -> None:
+    class CapturingPairingWindow:
+        def __init__(self, _controller, *, host, port, ca_certificate_path) -> None:
+            self.host = host
+            self.port = port
+            self.ca_certificate_path = ca_certificate_path
+
+    monkeypatch.setenv("STREAMDECK_PAIRING_SERVER_IP", "192.168.100.250")
+    monkeypatch.setattr(
+        "app.pairing_window.PairingWindow",
+        CapturingPairingWindow,
+    )
+    controller = FakeController()
+    controller.settings = Settings(
+        host="0.0.0.0",
+        port=8765,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("10.0.2.2", "localhost"),
+    )
+
+    window = TrayApplication(controller)._default_pairing_window()
+
+    assert window.host == "10.0.2.2"
+
+
+def test_tray_skips_unspecified_tls_identity_for_wildcard_bind(monkeypatch) -> None:
+    class CapturingPairingWindow:
+        def __init__(self, _controller, *, host, port, ca_certificate_path) -> None:
+            self.host = host
+            self.port = port
+            self.ca_certificate_path = ca_certificate_path
+
+    monkeypatch.delenv("STREAMDECK_PAIRING_SERVER_IP", raising=False)
+    monkeypatch.setattr(
+        "app.pairing_window.PairingWindow",
+        CapturingPairingWindow,
+    )
+    controller = FakeController()
+    controller.settings = Settings(
+        host="0.0.0.0",
+        port=8765,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("0.0.0.0", "10.0.2.2"),
+    )
+
+    window = TrayApplication(controller)._default_pairing_window()
+
+    assert window.host == "10.0.2.2"

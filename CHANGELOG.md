@@ -7,6 +7,26 @@ O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/) e o
 projeto adota [Versionamento Semântico](https://semver.org/lang/pt-BR/) para
 versões de produto; fases de desenvolvimento têm identificadores próprios.
 
+## [Não lançado]
+
+### Corrigido
+
+- A janela **Parear dispositivo** do tray agora cria a sessão administrativa pelo
+  loopback TLS, aguarda a criação da CA durante a inicialização do processo-filho
+  e deixa de chamar a rota `LOCAL_ONLY` pelo IPv4 privado.
+- Para um bind RFC1918 concreto, o runner abre sockets explícitos no IPv4 LAN e
+  em `127.0.0.1`, preservando o acesso do Android e sem ampliar o bind para
+  outras interfaces.
+- O certificado leaf inclui `127.0.0.1` além das identidades configuradas para o
+  Android; instalações existentes renovam somente o leaf e preservam a CA já
+  confiada pelo aplicativo.
+- Testes garantem que origens da rede privada continuam recebendo
+  `403 LOCAL_ONLY` e que o endereço apresentado ao Android permanece o IPv4 LAN.
+- O IPv4 RFC1918 configurado passa a ser incluído automaticamente no SAN do leaf;
+  o tray recusa o pareamento quando o bind escolhido não oferece o canal de
+  administração por loopback, e o controlador Windows preserva o PID para
+  encerrar a árvore mesmo após o processo pai terminar.
+
 ## [Fase 11] — 2026-08-11 — Onboarding e controles essenciais
 
 ### Adicionado
@@ -15,9 +35,10 @@ versões de produto; fases de desenvolvimento têm identificadores próprios.
   replay em Configurações; o replay é renderizado sobre o shell e preserva a
   sessão conectada.
 - Direção visual Command Glow com ícones vetoriais/tintáveis, semântica de cor,
-  estados de execução e grade 3 × 3.
+  estados de execução e grade 3 × 4.
 - Fixture e perfil built-in `Controles essenciais` com Play/Pause, Próxima, Mute,
-  Spotify, Chrome, Volume +, Volume −, Print Screen e uma célula livre.
+  Spotify, Chrome, Volume +, Volume −, Print Screen, CPU & Temp e Memória, além de
+  duas células livres.
 - Migração v5 idempotente com marcador transacional, allowlist
   `PRINTSCREEN`/`VK_SNAPSHOT` e catálogo fechado `chrome` → `chrome.exe`.
 - Executor de gravação opt-in para o harness, sem emissão de input real no

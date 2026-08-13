@@ -1,0 +1,114 @@
+{
+  "protocol_version": 1,
+  "id": "essential-controls",
+  "name": "Controles essenciais",
+  "revision": 1,
+  "active_page_id": "main",
+  "pages": [
+    {
+      "id": "main",
+      "title": "Principal",
+      "order": 0,
+      "rows": 3,
+      "columns": 3,
+      "buttons": [
+        {
+          "id": "media-play-pause",
+          "row": 0,
+          "column": 0,
+          "title": "Play/Pause",
+          "icon": "play_pause",
+          "color": "#8B5CF6",
+          "action": {
+            "type": "media",
+            "command": "play_pause"
+          }
+        },
+        {
+          "id": "media-next",
+          "row": 0,
+          "column": 1,
+          "title": "Próxima",
+          "icon": "skip_next",
+          "color": "#8B5CF6",
+          "action": {
+            "type": "media",
+            "command": "next"
+          }
+        },
+        {
+          "id": "media-mute",
+          "row": 0,
+          "column": 2,
+          "title": "Mute",
+          "icon": "volume_off",
+          "color": "#5AA7FF",
+          "action": {
+            "type": "media",
+            "command": "mute"
+          }
+        },
+        {
+          "id": "spotify-play-pause",
+          "row": 1,
+          "column": 0,
+          "title": "Spotify",
+          "icon": "spotify",
+          "color": "#1ED760",
+          "action": {
+            "type": "media",
+            "command": "play_pause"
+          }
+        },
+        {
+          "id": "open-chrome",
+          "row": 1,
+          "column": 1,
+          "title": "Chrome",
+          "icon": "chrome",
+          "color": "#FFB648",
+          "action": {
+            "type": "application",
+            "app_id": "chrome"
+          }
+        },
+        {
+          "id": "volume-up",
+          "row": 1,
+          "column": 2,
+          "title": "Volume +",
+          "icon": "volume_up",
+          "color": "#38D9C5",
+          "action": {
+            "type": "media",
+            "command": "volume_up"
+          }
+        },
+        {
+          "id": "volume-down",
+          "row": 2,
+          "column": 0,
+          "title": "Volume −",
+          "icon": "volume_down",
+          "color": "#38D9C5",
+          "action": {
+            "type": "media",
+            "command": "volume_down"
+          }
+        },
+        {
+          "id": "print-screen",
+          "row": 2,
+          "column": 1,
+          "title": "Print Screen",
+          "icon": "screenshot",
+          "color": "#FF5D73",
+          "action": {
+            "type": "key",
+            "key": "PRINTSCREEN"
+          }
+        }
+      ]
+    }
+  ]
+}

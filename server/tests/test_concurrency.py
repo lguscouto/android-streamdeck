@@ -57,6 +57,14 @@ def test_rate_limiter_reset_does_not_affect_other_origins() -> None:
     assert limiter.allow("b") is False
 
 
+def test_rate_limiter_bounds_distinct_origin_state() -> None:
+    limiter = AttemptRateLimiter(max_attempts=1, max_origins=2)
+
+    assert limiter.allow("a") is True
+    assert limiter.allow("b") is True
+    assert limiter.allow("c") is False
+
+
 def test_concurrent_profile_writes_are_serializable_without_lost_updates(
     tmp_path: Path,
 ) -> None:

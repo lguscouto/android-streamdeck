@@ -26,7 +26,10 @@
                 "row": 0,
                 "column": 0,
                 "title": "Botão",
-                "action": {"type": "key", "key": "A"}
+                "action": {
+                  "type": "key",
+                  "key": "A"
+                }
               }
             ]
           }
@@ -55,7 +58,10 @@
                 "row": 0,
                 "column": 0,
                 "title": "Botão",
-                "action": {"type": "key", "key": "A"}
+                "action": {
+                  "type": "key",
+                  "key": "A"
+                }
               }
             ]
           }
@@ -84,7 +90,10 @@
                 "row": 0,
                 "column": 0,
                 "title": "Botão",
-                "action": {"type": "key", "key": "A"}
+                "action": {
+                  "type": "key",
+                  "key": "A"
+                }
               }
             ]
           }
@@ -113,7 +122,10 @@
                 "row": 1,
                 "column": 0,
                 "title": "Botão",
-                "action": {"type": "key", "key": "A"}
+                "action": {
+                  "type": "key",
+                  "key": "A"
+                }
               }
             ]
           }
@@ -142,7 +154,10 @@
                 "row": 0,
                 "column": 0,
                 "title": "Botão",
-                "action": {"type": "key", "key": "A"}
+                "action": {
+                  "type": "key",
+                  "key": "A"
+                }
               }
             ]
           }
@@ -171,7 +186,10 @@
                 "row": 0,
                 "column": 0,
                 "title": "Botão",
-                "action": {"type": "shell", "command": "not-allowed"}
+                "action": {
+                  "type": "shell",
+                  "command": "not-allowed"
+                }
               }
             ]
           }
@@ -204,6 +222,135 @@
                   "type": "application",
                   "app_id": "editor",
                   "command": "not-allowed"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "system-info-missing-target",
+      "reason": "Ação system_info deve permanecer fechada em cpu ou memory, sem capacidades extras.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "system-info-missing-target",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {
+                  "type": "system_info"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "system-info-unknown-target",
+      "reason": "Ação system_info deve permanecer fechada em cpu ou memory, sem capacidades extras.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "system-info-unknown-target",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {
+                  "type": "system_info",
+                  "target": "disk"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "system-info-command-surface",
+      "reason": "Ação system_info deve permanecer fechada em cpu ou memory, sem capacidades extras.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "system-info-command-surface",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {
+                  "type": "system_info",
+                  "target": "cpu",
+                  "command": "whoami"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "system-info-wmi-query-surface",
+      "reason": "Ação system_info deve permanecer fechada em cpu ou memory, sem capacidades extras.",
+      "profile": {
+        "protocol_version": 1,
+        "id": "system-info-wmi-query-surface",
+        "name": "Perfil inválido",
+        "revision": 1,
+        "active_page_id": "main",
+        "pages": [
+          {
+            "id": "main",
+            "title": "Principal",
+            "order": 0,
+            "rows": 1,
+            "columns": 1,
+            "buttons": [
+              {
+                "id": "button",
+                "row": 0,
+                "column": 0,
+                "title": "Botão",
+                "action": {
+                  "type": "system_info",
+                  "target": "cpu",
+                  "query": "SELECT * FROM Win32_Process"
                 }
               }
             ]

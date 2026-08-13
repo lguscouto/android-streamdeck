@@ -51,9 +51,10 @@ def request(
     *,
     json_body: Any = None,
     headers: dict[str, str] | None = None,
+    client_origin: tuple[str, int] = ("127.0.0.1", 123),
 ) -> httpx.Response:
     async def send() -> httpx.Response:
-        transport = httpx.ASGITransport(app=app)
+        transport = httpx.ASGITransport(app=app, client=client_origin)
         async with httpx.AsyncClient(
             transport=transport, base_url="http://test"
         ) as client:
@@ -296,6 +297,7 @@ def test_action_catalog_is_exactly_closed_and_contains_no_command_surface(
             {"type": "text"},
             {"type": "url"},
             {"type": "application"},
+            {"type": "system_info"},
         ]
     }
     assert "shell" not in response.text.lower()
@@ -794,6 +796,209 @@ def test_local_pairing_session_returns_one_time_secret_and_bootstrap_bundle(
     assert bootstrap.headers["cache-control"] == "no-store"
     assert bootstrap.json()["ca_certificate_pem"] == VALID_CA_PEM
     assert presentation["pairing_code"] not in bootstrap.text
+
+
+def test_local_pairing_session_uses_configured_private_bind_host(
+    tmp_path: Path,
+) -> None:
+    admin_code = f"admin-{secrets.token_urlsafe(24)}"
+    app = create_app(
+        Settings(
+            host="192.168.100.20",
+            port=8765,
+            database_path=tmp_path / "streamdeck.sqlite3",
+            admin_code=admin_code,
+            require_auth=True,
+            tls_mode="required",
+            tls_identities=("192.168.100.21", "deck.example.test"),
+        ),
+        ca_certificate_pem=VALID_CA_PEM,
+    )
+
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["server_ip"] == "192.168.100.20"
+    assert "ip=192.168.100.20" in created.json()["qr_uri"]
+
+
+def test_local_pairing_session_ignores_override_for_concrete_bind_host(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STREAMDECK_PAIRING_SERVER_IP", "192.168.100.21")
+    admin_code = f"admin-{secrets.token_urlsafe(24)}"
+    app = create_app(
+        Settings(
+            host="192.168.100.20",
+            port=8765,
+            database_path=tmp_path / "streamdeck.sqlite3",
+            admin_code=admin_code,
+            require_auth=True,
+            tls_mode="required",
+            tls_identities=("192.168.100.20",),
+        ),
+        ca_certificate_pem=VALID_CA_PEM,
+    )
+
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["server_ip"] == "192.168.100.20"
+
+
+def test_local_pairing_session_uses_private_identity_for_wildcard_bind(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("STREAMDECK_PAIRING_SERVER_IP", raising=False)
+    admin_code = f"admin-{secrets.token_urlsafe(24)}"
+    app = create_app(
+        Settings(
+            host="0.0.0.0",
+            port=8765,
+            database_path=tmp_path / "streamdeck.sqlite3",
+            admin_code=admin_code,
+            require_auth=True,
+            tls_mode="required",
+            tls_identities=("10.0.2.2", "localhost"),
+        ),
+        ca_certificate_pem=VALID_CA_PEM,
+    )
+
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["server_ip"] == "10.0.2.2"
+    assert "ip=10.0.2.2" in created.json()["qr_uri"]
+
+
+def test_local_pairing_session_uses_san_covered_wildcard_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STREAMDECK_PAIRING_SERVER_IP", "192.168.100.250")
+    admin_code = f"admin-{secrets.token_urlsafe(24)}"
+    app = create_app(
+        Settings(
+            host="0.0.0.0",
+            port=8765,
+            database_path=tmp_path / "streamdeck.sqlite3",
+            admin_code=admin_code,
+            require_auth=True,
+            tls_mode="required",
+            tls_identities=("10.0.2.2", "192.168.100.250"),
+        ),
+        ca_certificate_pem=VALID_CA_PEM,
+    )
+
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["server_ip"] == "192.168.100.250"
+
+
+def test_local_pairing_session_ignores_wildcard_override_outside_tls_san(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("STREAMDECK_PAIRING_SERVER_IP", "192.168.100.250")
+    admin_code = f"admin-{secrets.token_urlsafe(24)}"
+    app = create_app(
+        Settings(
+            host="0.0.0.0",
+            port=8765,
+            database_path=tmp_path / "streamdeck.sqlite3",
+            admin_code=admin_code,
+            require_auth=True,
+            tls_mode="required",
+            tls_identities=("10.0.2.2", "localhost"),
+        ),
+        ca_certificate_pem=VALID_CA_PEM,
+    )
+
+    created = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    )
+
+    assert created.status_code == 200
+    assert created.json()["server_ip"] == "10.0.2.2"
+
+
+def test_local_pairing_session_is_unavailable_for_hostname_bind(
+    tmp_path: Path,
+) -> None:
+    admin_code = f"admin-{secrets.token_urlsafe(24)}"
+    app = create_app(
+        Settings(
+            host="streamdeck.local",
+            port=8765,
+            database_path=tmp_path / "streamdeck.sqlite3",
+            admin_code=admin_code,
+            require_auth=True,
+            tls_mode="required",
+            tls_identities=("streamdeck.local",),
+        ),
+        ca_certificate_pem=VALID_CA_PEM,
+    )
+
+    response = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "code": "PAIRING_UNAVAILABLE",
+        "message": "Pairing is unavailable",
+        "retryable": True,
+    }
+
+
+def test_local_pairing_session_remains_forbidden_from_private_network_origin(
+    tmp_path: Path,
+) -> None:
+    app, admin_code = make_pairing_session_app(tmp_path)
+
+    response = request(
+        app,
+        "POST",
+        "/api/v1/local/pairing-session",
+        headers={"X-StreamDeck-Admin-Code": admin_code},
+        client_origin=("192.168.100.30", 50123),
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "code": "LOCAL_ONLY",
+        "message": "Pairing session creation is local-only",
+        "retryable": False,
+    }
 
 
 def test_session_claim_issues_token_and_replay_is_rejected(tmp_path: Path) -> None:

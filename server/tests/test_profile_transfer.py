@@ -40,6 +40,21 @@ def test_valid_export_fixture_is_importable_against_draft_2020_12() -> None:
 
     assert isinstance(profile, Profile)
     assert profile.id == "phase5-export"
+    actions = [
+        button.action.to_wire() for page in profile.pages for button in page.buttons
+    ]
+    assert {action["type"] for action in actions} == {
+        "application",
+        "hotkey",
+        "key",
+        "media",
+        "system_info",
+        "text",
+        "url",
+    }
+    assert {
+        action["target"] for action in actions if action["type"] == "system_info"
+    } == {"cpu", "memory"}
     assert not list(profile_schema_validator().iter_errors(profile.to_wire()))
 
 
@@ -84,6 +99,10 @@ def test_import_export_round_trip_preserves_only_wire_content() -> None:
         "invalid-revision",
         "shell-action",
         "command-outside-media",
+        "system-info-missing-target",
+        "system-info-unknown-target",
+        "system-info-command-surface",
+        "system-info-wmi-query-surface",
     ],
 )
 def test_invalid_profile_import_fixtures_are_rejected(case_id: str) -> None:

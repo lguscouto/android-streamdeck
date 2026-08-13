@@ -4,6 +4,7 @@ import os
 import secrets
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from enum import Enum
 from pathlib import Path
@@ -22,6 +23,17 @@ class ServerStartError(RuntimeError):
 
 
 ProcessFactory = Callable[..., Any]
+
+
+def _taskkill_command(pid: int) -> list[str]:
+    system_root = os.environ.get("SystemRoot", r"C:\Windows")
+    return [
+        str(Path(system_root) / "System32" / "taskkill.exe"),
+        "/PID",
+        str(pid),
+        "/T",
+        "/F",
+    ]
 
 
 def build_server_command(
@@ -63,6 +75,7 @@ class ServerProcessController:
         self._cwd = Path(cwd) if cwd is not None else self._default_cwd()
         self._process_factory = process_factory
         self._stop_timeout_seconds = stop_timeout_seconds
+        self._lifecycle_lock = threading.RLock()
         self._process: Any | None = None
         self._admin_code = settings.admin_code or secrets.token_urlsafe(32)
 
@@ -74,12 +87,13 @@ class ServerProcessController:
 
     @property
     def status(self) -> ProcessStatus:
-        process = self._process
-        if process is not None and process.poll() is None:
-            return ProcessStatus.RUNNING
-        if process is not None:
-            self._process = None
-        return ProcessStatus.STOPPED
+        with self._lifecycle_lock:
+            process = self._process
+            if process is not None and process.poll() is None:
+                return ProcessStatus.RUNNING
+            if process is not None and process.poll() is not None:
+                self._process = None
+            return ProcessStatus.STOPPED
 
     @property
     def is_running(self) -> bool:
@@ -92,34 +106,54 @@ class ServerProcessController:
 
     def start(self) -> bool:
         """Start the owned server once; return False when it is already running."""
-        if self.is_running:
-            return False
+        with self._lifecycle_lock:
+            if self.is_running:
+                return False
+            if self._process is not None:
+                self._stop_locked()
 
-        try:
-            self._process = self._process_factory(
-                list(self._command),
-                cwd=str(self._cwd),
-                env=self._child_environment(),
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                shell=False,
-                close_fds=True,
-                **self._creation_flags(),
-            )
-        except OSError as exc:
-            self._process = None
-            raise ServerStartError("server process could not be started") from exc
-        return True
+            try:
+                self._process = self._process_factory(
+                    list(self._command),
+                    cwd=str(self._cwd),
+                    env=self._child_environment(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    shell=False,
+                    close_fds=True,
+                    **self._creation_flags(),
+                )
+            except OSError as exc:
+                self._process = None
+                raise ServerStartError("server process could not be started") from exc
+            return True
 
     def stop(self) -> bool:
         """Stop only the process owned by this controller."""
+        with self._lifecycle_lock:
+            return self._stop_locked()
+
+    def _stop_locked(self) -> bool:
         process = self._process
-        if process is None or process.poll() is not None:
+        if process is None:
             self._process = None
             return False
-
-        process.terminate()
+        if process.poll() is not None:
+            self._process = None
+            return False
+        if os.name == "nt":
+            subprocess.run(
+                _taskkill_command(process.pid),
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            if process.poll() is not None:
+                self._process = None
+                return False
+            process.terminate()
         try:
             process.wait(timeout=self._stop_timeout_seconds)
         except (subprocess.TimeoutExpired, TimeoutError):
@@ -130,7 +164,23 @@ class ServerProcessController:
         return True
 
     def _child_environment(self) -> dict[str, str]:
-        environment = os.environ.copy()
+        inherited_names = {
+            "APPDATA",
+            "COMSPEC",
+            "LOCALAPPDATA",
+            "PATH",
+            "PROGRAMDATA",
+            "SYSTEMROOT",
+            "TEMP",
+            "TMP",
+            "USERPROFILE",
+            "WINDIR",
+        }
+        environment = {
+            name: value
+            for name, value in os.environ.items()
+            if name.upper() in inherited_names
+        }
         environment["STREAMDECK_HOST"] = self.settings.host
         environment["STREAMDECK_PORT"] = str(self.settings.port)
         environment["STREAMDECK_DATABASE_PATH"] = str(self.settings.database_path)

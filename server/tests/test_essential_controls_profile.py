@@ -67,6 +67,15 @@ EXPECTED_BUTTONS = [
         {"type": "media", "command": "volume_up"},
     ),
     (
+        "system-gpu",
+        1,
+        3,
+        "GPU & VRAM",
+        "gpu",
+        "#8B5CF6",
+        {"type": "system_info", "target": "gpu"},
+    ),
+    (
         "volume-down",
         2,
         0,
@@ -83,6 +92,24 @@ EXPECTED_BUTTONS = [
         "screenshot",
         "#FF5D73",
         {"type": "key", "key": "PRINTSCREEN"},
+    ),
+    (
+        "system-cpu",
+        2,
+        2,
+        "CPU & Temp",
+        "cpu",
+        "#5AA7FF",
+        {"type": "system_info", "target": "cpu"},
+    ),
+    (
+        "system-memory",
+        2,
+        3,
+        "Memória",
+        "memory",
+        "#38D9C5",
+        {"type": "system_info", "target": "memory"},
     ),
 ]
 
@@ -104,7 +131,7 @@ def test_essential_controls_fixture_is_a_valid_closed_profile() -> None:
         "Principal",
         0,
         3,
-        3,
+        4,
     )
     assert [
         (
@@ -125,8 +152,11 @@ def test_essential_controls_fixture_is_a_valid_closed_profile() -> None:
         (1, 0),
         (1, 1),
         (1, 2),
+        (1, 3),
         (2, 0),
         (2, 1),
+        (2, 2),
+        (2, 3),
     }
 
     assert not list(Draft202012Validator(schema).iter_errors(payload))

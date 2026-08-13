@@ -93,6 +93,7 @@ MediaCommand = Literal[
     "volume_down",
     "mute",
 ]
+SystemInfoTarget = Literal["cpu", "memory", "gpu"]
 
 
 class HotkeyAction(StrictModel):
@@ -181,8 +182,19 @@ class ApplicationAction(StrictModel):
     app_id: StableId
 
 
+class SystemInfoAction(StrictModel):
+    type: Literal["system_info"]
+    target: SystemInfoTarget
+
+
 Action: TypeAlias = Annotated[
-    HotkeyAction | KeyAction | MediaAction | TextAction | UrlAction | ApplicationAction,
+    HotkeyAction
+    | KeyAction
+    | MediaAction
+    | TextAction
+    | UrlAction
+    | ApplicationAction
+    | SystemInfoAction,
     Field(discriminator="type"),
 ]
 
@@ -434,6 +446,8 @@ __all__ = [
     "ProfileChangedPayload",
     "ProfileSnapshotMessage",
     "ProfileSnapshotPayload",
+    "SystemInfoAction",
+    "SystemInfoTarget",
     "TextAction",
     "UrlAction",
     "WelcomeMessage",

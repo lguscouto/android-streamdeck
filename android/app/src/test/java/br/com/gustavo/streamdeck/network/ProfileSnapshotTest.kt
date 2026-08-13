@@ -95,6 +95,142 @@ class ProfileSnapshotTest {
     }
 
     @Test
+    fun `parses and serializes system info actions`() {
+        val snapshot = ProfileSnapshotParser.parse(
+            """
+            {
+              "protocol_version": 1,
+              "type": "profile_snapshot",
+              "payload": {"profile": {
+                "protocol_version": 1,
+                "id": "default",
+                "name": "Perfil",
+                "revision": 1,
+                "active_page_id": "main",
+                "pages": [{
+                  "id": "main", "title": "Principal", "order": 0,
+                  "rows": 1, "columns": 1,
+                  "buttons": [{
+                    "id": "cpu", "row": 0, "column": 0, "title": "CPU & Temp",
+                    "action": {"type": "system_info", "target": "cpu"}
+                  }]
+                }]
+              }}
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(
+            StreamDeckSystemInfoAction("cpu"),
+            snapshot.activePage.buttons.single().action,
+        )
+
+        val wire = ProfileSnapshotSerializer.toWire(snapshot)
+        val action = JSONObject(wire)
+            .getJSONArray("pages")
+            .getJSONObject(0)
+            .getJSONArray("buttons")
+            .getJSONObject(0)
+            .getJSONObject("action")
+        assertEquals("system_info", action.getString("type"))
+        assertEquals("cpu", action.getString("target"))
+    }
+
+    @Test
+    fun `parses and serializes gpu system info action`() {
+        val snapshot = ProfileSnapshotParser.parse(
+            """
+            {
+              "protocol_version": 1,
+              "type": "profile_snapshot",
+              "payload": {"profile": {
+                "protocol_version": 1,
+                "id": "default",
+                "name": "Perfil",
+                "revision": 1,
+                "active_page_id": "main",
+                "pages": [{
+                  "id": "main", "title": "Principal", "order": 0,
+                  "rows": 1, "columns": 1,
+                  "buttons": [{
+                    "id": "gpu", "row": 0, "column": 0, "title": "GPU & VRAM",
+                    "action": {"type": "system_info", "target": "gpu"}
+                  }]
+                }]
+              }}
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(StreamDeckSystemInfoAction("gpu"), snapshot.activePage.buttons.single().action)
+        val action = JSONObject(ProfileSnapshotSerializer.toWire(snapshot))
+            .getJSONArray("pages")
+            .getJSONObject(0)
+            .getJSONArray("buttons")
+            .getJSONObject(0)
+            .getJSONObject("action")
+        assertEquals("gpu", action.getString("target"))
+    }
+
+    @Test
+    fun `rejects system info target outside the closed catalog`() {
+        val malformedSnapshot = """
+            {
+              "protocol_version": 1,
+              "type": "profile_snapshot",
+              "payload": {"profile": {
+                "protocol_version": 1,
+                "id": "default",
+                "name": "Perfil",
+                "revision": 1,
+                "active_page_id": "main",
+                "pages": [{
+                  "id": "main", "title": "Principal", "order": 0,
+                  "rows": 1, "columns": 1,
+                  "buttons": [{
+                    "id": "bad", "row": 0, "column": 0, "title": "Inválido",
+                    "action": {"type": "system_info", "target": "disk"}
+                  }]
+                }]
+              }}
+            }
+        """.trimIndent()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileSnapshotParser.parse(malformedSnapshot)
+        }
+    }
+
+    @Test
+    fun `rejects padded system info target outside shared contract`() {
+        val malformedSnapshot = """
+            {
+              "protocol_version": 1,
+              "type": "profile_snapshot",
+              "payload": {"profile": {
+                "protocol_version": 1,
+                "id": "default",
+                "name": "Perfil",
+                "revision": 1,
+                "active_page_id": "main",
+                "pages": [{
+                  "id": "main", "title": "Principal", "order": 0,
+                  "rows": 1, "columns": 1,
+                  "buttons": [{
+                    "id": "bad", "row": 0, "column": 0, "title": "Inválido",
+                    "action": {"type": "system_info", "target": " cpu "}
+                  }]
+                }]
+              }}
+            }
+        """.trimIndent()
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ProfileSnapshotParser.parse(malformedSnapshot)
+        }
+    }
+
+    @Test
     fun `parses configured grid and preserves button presentation data`() {
         val snapshot = ProfileSnapshotParser.parse(
             """

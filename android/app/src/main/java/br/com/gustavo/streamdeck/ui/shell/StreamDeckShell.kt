@@ -74,6 +74,7 @@ import br.com.gustavo.streamdeck.ui.ProfileEditorDraft
 import br.com.gustavo.streamdeck.ui.ProfileEditorScreen
 import br.com.gustavo.streamdeck.ui.ProfileManagementScreen
 import br.com.gustavo.streamdeck.ui.StreamDeckGrid
+import br.com.gustavo.streamdeck.ui.completedActionMessage
 import br.com.gustavo.streamdeck.ui.components.ConnectionPill
 import br.com.gustavo.streamdeck.ui.deck.ConnectedDeckScreen
 import br.com.gustavo.streamdeck.ui.components.ConnectionStatus
@@ -165,7 +166,9 @@ fun PairingScreen(
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var profileSnapshot by remember { mutableStateOf<StreamDeckProfileSnapshot?>(null) }
     var buttonStates by remember { mutableStateOf<Map<String, ButtonExecutionState>>(emptyMap()) }
-    var pendingPresses by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var pendingPresses by remember {
+        mutableStateOf<Map<String, StreamDeckButton>>(emptyMap())
+    }
     var destination by remember { mutableStateOf<StreamDeckDestination>(StreamDeckDestination.Deck) }
     var editorDraft by remember { mutableStateOf<ProfileEditorDraft?>(null) }
     var editorOriginalDraft by remember { mutableStateOf<ProfileEditorDraft?>(null) }
@@ -194,7 +197,7 @@ fun PairingScreen(
     }
 
     fun rejectPendingActions(message: String) {
-        val pendingButtons = pendingPresses.values
+        val pendingButtons = pendingPresses.values.map(StreamDeckButton::id)
         if (pendingButtons.isNotEmpty()) {
             buttonStates = buttonStates + pendingButtons.associateWith {
                 ButtonExecutionState.REJECTED
@@ -313,7 +316,9 @@ fun PairingScreen(
                                     val acknowledgement = ProtocolMessages
                                         .actionAcknowledgement(rawMessage)
                                         ?: return
-                                    val buttonId = pendingPresses[acknowledgement.requestId] ?: return
+                                    val pendingButton = pendingPresses[acknowledgement.requestId]
+                                        ?: return
+                                    val buttonId = pendingButton.id
                                     when (acknowledgement.status) {
                                         ActionAcknowledgementStatus.ACCEPTED -> {
                                             buttonStates = buttonStates + (
@@ -325,7 +330,11 @@ fun PairingScreen(
                                                 buttonId to ButtonExecutionState.COMPLETED
                                             )
                                             pendingPresses = pendingPresses - acknowledgement.requestId
-                                            statusMessage = actionCompleted
+                                            statusMessage = completedActionMessage(
+                                                button = pendingButton,
+                                                acknowledgementMessage = acknowledgement.message,
+                                                defaultMessage = actionCompleted,
+                                            )
                                         }
                                         ActionAcknowledgementStatus.REJECTED -> {
                                             buttonStates = buttonStates + (
@@ -343,13 +352,13 @@ fun PairingScreen(
                                     val message = payload?.optString("message")
                                         ?.ifBlank { "Erro do servidor" }
                                         ?: "Erro do servidor"
-                                    val buttonId = requestId?.let { pendingPresses[it] }
-                                    if (buttonId == null) {
+                                    val pendingButton = requestId?.let { pendingPresses[it] }
+                                    if (pendingButton == null) {
                                         status = ConnectionStatus.ERROR
                                         statusMessage = message
                                     } else {
                                         buttonStates = buttonStates + (
-                                            buttonId to ButtonExecutionState.REJECTED
+                                            pendingButton.id to ButtonExecutionState.REJECTED
                                         )
                                         pendingPresses = pendingPresses - requestId
                                         statusMessage = message
@@ -425,7 +434,7 @@ fun PairingScreen(
         }
         val requestId = UUID.randomUUID().toString()
         buttonStates = buttonStates + (button.id to ButtonExecutionState.EXECUTING)
-        pendingPresses = pendingPresses + (requestId to button.id)
+        pendingPresses = pendingPresses + (requestId to button)
         val wasSent = activeSocket.send(
             ProtocolMessages.press(
                 requestId = requestId,

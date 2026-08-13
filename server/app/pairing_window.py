@@ -66,12 +66,14 @@ class PairingWindow:
 
     @property
     def base_url(self) -> str:
-        return f"https://{self.host}:{self.port}"
+        """Use loopback for owner-only administration; payload keeps the LAN host."""
+        return f"https://127.0.0.1:{self.port}"
 
     def fetch_session(self) -> PairingSessionPresentation:
         """Start child if needed, wait for health, and claim a display session."""
         if not self.controller.is_running:
             self.controller.start()
+        self._wait_for_ca_certificate()
         with self._client_factory(
             verify=str(self.ca_certificate_path),
             timeout=2.0,
@@ -86,6 +88,15 @@ class PairingWindow:
             presentation = self._parse_presentation(response.json())
         self._presentation = presentation
         return presentation
+
+    def _wait_for_ca_certificate(self) -> None:
+        deadline = self._monotonic() + self._health_timeout_seconds
+        while not self.ca_certificate_path.is_file():
+            if self._monotonic() >= deadline:
+                raise PairingWindowError(
+                    "local server trust material did not become ready"
+                )
+            self._sleep(0.2)
 
     def open(self) -> None:
         """Open the native Windows window; the optional GUI is imported lazily."""
@@ -241,7 +252,12 @@ def _require_private_ipv4(value: str) -> str:
         address = ipaddress.ip_address(value)
     except ValueError as exc:
         raise ValueError("pairing window requires a private IPv4 address") from exc
-    if address.version != 4 or not address.is_private or address.is_loopback:
+    if (
+        address.version != 4
+        or not address.is_private
+        or address.is_loopback
+        or address.is_unspecified
+    ):
         raise ValueError("pairing window requires a private IPv4 address")
     return str(address)
 

@@ -102,6 +102,61 @@ def test_authenticated_private_interface_bind_can_use_discovery() -> None:
     )
 
     assert settings.discovery_enabled is True
+    assert settings.server_bind_hosts == ("192.168.1.20", "127.0.0.1")
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["127.0.0.1", "localhost", "::1", "0.0.0.0", "server.local"],
+)
+def test_non_private_ipv4_bind_keeps_single_server_socket(host: str) -> None:
+    is_loopback = host in {"127.0.0.1", "localhost", "::1"}
+    settings = Settings(
+        host=host,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="auto" if is_loopback else "required",
+        tls_identities=() if is_loopback else ("deck.example.test",),
+    )
+
+    assert settings.server_bind_hosts == (host,)
+
+
+def test_hostname_remote_bind_keeps_single_server_socket() -> None:
+    settings = Settings(
+        host="streamdeck.local",
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("streamdeck.local", "192.168.1.20"),
+    )
+
+    assert settings.server_bind_hosts == ("streamdeck.local",)
+
+
+def test_hostname_remote_bind_does_not_claim_loopback_pairing_support() -> None:
+    settings = Settings(
+        host="streamdeck.local",
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="required",
+        tls_identities=("streamdeck.local",),
+    )
+
+    assert settings.local_pairing_supported is False
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
+def test_loopback_bind_does_not_claim_remote_pairing_support(host: str) -> None:
+    settings = Settings(
+        host=host,
+        pairing_code="safe-test-code",
+        require_auth=True,
+        tls_mode="auto" if host != "::1" else "required",
+        tls_identities=("localhost",) if host == "::1" else (),
+    )
+
+    assert settings.local_pairing_supported is False
 
 
 def test_remote_bind_still_requires_authentication() -> None:

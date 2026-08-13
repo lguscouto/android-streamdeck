@@ -57,6 +57,14 @@ data class StreamDeckApplicationAction(
         .put("app_id", appId)
 }
 
+data class StreamDeckSystemInfoAction(
+    val target: String,
+) : StreamDeckAction {
+    override fun toJson(): JSONObject = JSONObject()
+        .put("type", "system_info")
+        .put("target", target)
+}
+
 data class StreamDeckProfileSnapshot(
     val profileId: String,
     val profileName: String,
@@ -228,7 +236,8 @@ object ProfileSnapshotParser {
     }
 
     private fun parseAction(action: JSONObject): StreamDeckAction {
-        val type = requiredString(action, "type")
+        // Action discriminators are wire enums, not presentation strings.
+        val type = action.getString("type")
         return when (type) {
             "hotkey" -> {
                 requireExactKeys(action, required = setOf("type", "modifiers", "key"))
@@ -274,6 +283,16 @@ object ProfileSnapshotParser {
             "application" -> {
                 requireExactKeys(action, required = setOf("type", "app_id"))
                 StreamDeckApplicationAction(requiredStableId(action, "app_id"))
+            }
+            "system_info" -> {
+                requireExactKeys(action, required = setOf("type", "target"))
+                // Keep enum members byte-for-byte aligned with the shared JSON
+                // Schema; unlike display text, action discriminators are not trimmed.
+                val target = action.getString("target")
+                require(target in ALLOWED_SYSTEM_INFO_TARGETS) {
+                    "System information target is not supported"
+                }
+                StreamDeckSystemInfoAction(target)
             }
             else -> throw IllegalArgumentException("Unsupported action type")
         }
@@ -347,6 +366,7 @@ object ProfileSnapshotParser {
         "volume_down",
         "mute",
     )
+    private val ALLOWED_SYSTEM_INFO_TARGETS = setOf("cpu", "memory", "gpu")
     private val HTTPS_URL = Regex("^https://[^\\s\\\\\\u0000-\\u001F\\u007F-\\u009F]+$")
 
     private fun isSafeHttpsUrl(url: String): Boolean {

@@ -216,19 +216,21 @@ class PairingFlowInstrumentedTest {
 
     private fun assertActionFeedback() {
         listOf(
-            "Play/Pause",
-            "Próxima",
-            "Mute",
-            "Spotify",
-            "Chrome",
-            "Volume +",
-            "Volume −",
-            "Print Screen",
-        ).forEach { label ->
+            "Play/Pause" to "Concluído",
+            "Próxima" to "Concluído",
+            "Mute" to "Concluído",
+            "Spotify" to "Concluído",
+            "Chrome" to "Concluído",
+            "Volume +" to "Concluído",
+            "Volume −" to "Concluído",
+            "Print Screen" to "Concluído",
+            "CPU & Temp" to "CPU: 42% | N/A",
+            "Memória" to "RAM: 47% (8.5/16.0 GB)",
+        ).forEach { (label, expectedFeedback) ->
             tapByText(label)
             assertTrue(
                 "action '$label' did not complete. Visible: ${visibleNonSensitiveText()}",
-                device.wait(Until.hasObject(By.text("Concluído")), TIMEOUT_MS),
+                device.wait(Until.hasObject(By.text(expectedFeedback)), TIMEOUT_MS),
             )
         }
     }
@@ -283,6 +285,8 @@ class PairingFlowInstrumentedTest {
             "Volume +",
             "Volume −",
             "Print Screen",
+            "CPU & Temp",
+            "Memória",
         ).forEach(::assertTextVisible)
     }
 

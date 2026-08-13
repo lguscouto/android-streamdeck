@@ -27,14 +27,14 @@ Esta matriz separa o inventário verificado no host das escolhas provisórias pa
 | Dependências da toolchain | Cache local com AGP `8.2.1`, `8.7.2`, `8.8.2`; Gradle `8.10.2`, `8.13`, `9.4.1`; Kotlin Gradle plugin `2.0.21`; Compose UI `1.8.3`; Material3 `1.3.2`; Activity Compose `1.10.0` | Kotlin `2.0.21`, AGP `8.8.2`, Gradle `8.10.2` | Versões disponíveis no cache; a combinação ainda deve ser exercitada no build do projeto |
 | A10 | Nenhum dispositivo/emulador conectado; `ro.build.version.sdk`, modelo, tamanho e densidade não medidos | `minSdk 26` somente para manter o esqueleto compilável | Deve ser confirmado/ajustado após obter a API real do A10, antes do release |
 | Servidor | Python `3.14.6` e uv `0.11.21` encontrados | Python `3.14.6` com uv `0.11.21`, FastAPI/WebSocket, `127.0.0.1:8765` no desenvolvimento | Bind remoto exige código de pareamento e autenticação |
-| Grade do painel | O perfil built-in atual foi validado como 3 colunas × 3 linhas, com oito controles e uma célula livre | A grade continua definida pelo snapshot `rows × columns`; o perfil inicial usa 3 × 3 | A ergonomia do A10 ainda requer validação física |
+| Grade do painel | O perfil built-in atual usa 4 colunas × 3 linhas e dez controles, incluindo CPU e memória | A grade continua definida pelo snapshot `rows × columns`; o perfil inicial usa 3 × 4 | A ergonomia do A10 ainda requer validação física |
 
 ### Como revisar a decisão quando o A10 for conectado
 
 1. Conectar e autorizar o A10, confirmar que ele aparece em `adb devices -l` e executar `adb shell getprop ro.product.model`.
 2. Registrar os resultados reais de `adb shell getprop ro.build.version.sdk`, `adb shell wm size` e `adb shell wm density` em `docs/setup-android.md`.
 3. Comparar a API medida com o `minSdk 26` provisório e ajustar o `minSdk` se a política de suporte exigir; a decisão final deve ser tomada com base na API real, não no nome “A10”.
-4. Usar tamanho e densidade medidos para validar a grade 3 × 3 inicial, ajustando o default ou mantendo-o como configuração do usuário conforme o espaço disponível.
+4. Usar tamanho e densidade medidos para validar a grade 3 × 4 inicial, ajustando o default ou mantendo-o como configuração do usuário conforme o espaço disponível.
 5. Exercitar a combinação Kotlin/AGP/Gradle/SDK em um build real e registrar o resultado. Só depois dessas verificações a matriz poderá deixar de ser provisória; este documento não afirma que um APK já foi criado.
 
 ## Cliente Android
@@ -55,8 +55,8 @@ interromper a reconexão. Configurações oferece `Ver tutorial novamente`, sem
 apagar credenciais ou preferências.
 
 A grade usa vetores Compose/Material Icons, cores semânticas e bordas de accent
-em vez de bitmaps dos mockups. O perfil inicial é 3 × 3, row-major, com oito
-controles e uma nona célula não interativa. O tile Spotify declara na
+em vez de bitmaps dos mockups. O perfil inicial é 3 × 4, row-major, com dez
+controles, incluindo CPU & Temp e Memória. O tile Spotify declara na
 acessibilidade que atua sobre a sessão de mídia global; não há OAuth ou promessa
 de exclusividade. Tema claro/escuro, redução de movimento, háptico e fonte
 ampliada continuam sob as preferências existentes.
@@ -66,7 +66,7 @@ ampliada continuam sob as preferências existentes.
 - **Stack:** Python, FastAPI e WebSocket.
 - **Persistência:** SQLite local para catálogo/configuração das ações, preferências mínimas e histórico estritamente necessário. O arquivo do banco é dado de runtime e deve permanecer fora do Git.
 - **Contratos:** mensagens WebSocket e endpoints auxiliares devem usar esquemas explícitos, validar tipos, limites e identificadores, e retornar erros estruturados.
-- **Execução:** cada ação é um adaptador registrado no servidor, com código próprio e parâmetros permitidos. O registry atual mantém allowlists fechadas para `hotkey`, `key`, `media`, `text`, `url` e `application`. A aplicação é resolvida por catálogo interno: `chrome` → `chrome.exe`, sem caminho ou argumentos do cliente. `PRINTSCREEN` é mapeado para `VK_SNAPSHOT` (`0x2C`) com down/up. Spotify usa a sessão multimídia global. O modo de gravação do harness é opt-in e não emite efeitos no desktop; produção usa os adaptadores Windows reais.
+- **Execução:** cada ação é um adaptador registrado no servidor, com código próprio e parâmetros permitidos. O registry atual mantém allowlists fechadas para `hotkey`, `key`, `media`, `text`, `url`, `application` e `system_info`. `system_info` aceita somente `cpu` e `memory`, lê APIs Win32 internas e usa WMI de zona térmica ACPI apenas como fallback sem consulta recebida do cliente; essa leitura depende do firmware e não equivale necessariamente à temperatura do pacote da CPU. A aplicação é resolvida por catálogo interno: `chrome` → `chrome.exe`, sem caminho ou argumentos do cliente. `PRINTSCREEN` é mapeado para `VK_SNAPSHOT` (`0x2C`) com down/up. Spotify usa a sessão multimídia global. O modo de gravação do harness é opt-in e não emite efeitos no desktop; produção usa os adaptadores Windows reais.
 
 O perfil built-in `essential-controls` é carregado de uma fixture versionada e
 instalado uma única vez por banco, com marcador persistente e transação. A

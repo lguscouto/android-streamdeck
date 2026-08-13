@@ -63,6 +63,14 @@ manualmente, sem depender do mDNS. A configuração de descoberta é rejeitada e
 loopback, wildcard, hostname, IP público ou rede reservada; use somente um IPv4
 RFC1918 concreto (`10/8`, `172.16/12` ou `192.168/16`).
 
+Quando `STREAMDECK_HOST` é esse IPv4 concreto, o runner mantém a identidade LAN
+anunciada e abre sockets explícitos no IPv4 configurado e em `127.0.0.1`, na
+mesma porta. O segundo socket atende somente ao canal administrativo do tray;
+a rota de criação da sessão continua rejeitando origens não-loopback. O runner
+não usa wildcard implicitamente. Binds por hostname arbitrário continuam com um
+único socket e não são elegíveis para o botão **Parear dispositivo**, pois o
+tray usa deliberadamente `https://127.0.0.1:<porta>` para a administração local.
+
 ### Bundle Windows e smoke
 
 A partir de `server/`, com as dependências de desenvolvimento instaladas:
@@ -129,12 +137,13 @@ código de pareamento e autenticação.
 
 ## Expor para o Android na rede local
 
-O bind remoto exige autenticação e TLS. Configure um código administrativo e as
-identidades SAN fora do Git. A CA privada/leaf são criadas em
+O bind remoto exige autenticação e TLS. Para um celular físico, use um IPv4
+RFC1918 concreto, configure um código administrativo e as identidades SAN fora
+do Git. A CA privada/leaf são criadas em
 `%LOCALAPPDATA%\AndroidStreamDeck\tls` por padrão:
 
 ```bash
-export STREAMDECK_HOST=0.0.0.0
+export STREAMDECK_HOST=192.168.1.44
 export STREAMDECK_PORT=8765
 export STREAMDECK_ADMIN_CODE='OUTRO_CODIGO_ADMINISTRATIVO_AQUI'
 export STREAMDECK_REQUIRE_AUTH=true
@@ -159,6 +168,11 @@ O certificado precisa conter `10.0.2.2` no SAN. Em um celular físico, use o IP
 privado do Windows, com o mesmo IP incluído em `STREAMDECK_TLS_IDENTITIES`.
 O firewall do Windows deve permitir a porta somente na rede privada apropriada;
 essa regra ainda é uma etapa operacional manual.
+
+Para o Android Emulator, e somente para ele, `STREAMDECK_HOST=0.0.0.0` pode ser
+usado com `STREAMDECK_TLS_IDENTITIES=10.0.2.2`; nesse caso o endpoint do
+emulador é `https://10.0.2.2:8765`. Não use o wildcard como configuração genérica
+para celulares físicos.
 
 ## Pareamento e autenticação
 
@@ -215,14 +229,16 @@ fecham imediatamente as sessões WSS afetadas com `AUTH_REVOKED`/`1008`.
 
 Em uma instalação nova, o servidor instala de forma transacional e idempotente o
 perfil built-in `essential-controls` (`Controles essenciais`), com a página
-`Principal` em uma grade 3 × 3 e oito controles. A nona célula permanece livre e
-não interativa. O marcador `builtin_profile_installations` impede recriação
+`Principal` em uma grade 3 × 4 e dez controles, incluindo telemetria de CPU e
+memória. O marcador `builtin_profile_installations` impede recriação
 silenciosa após uma remoção voluntária.
 
-Em um banco existente, a instalação nunca substitui o perfil ativo ou um perfil
-personalizado. Se houver outro perfil ativo, o built-in é criado inativo; se o ID
-já estiver ocupado por dados do usuário, a colisão é preservada e somente o
-marcador de instalação é registrado. A migração para o schema 5 é idempotente e
+Em um banco existente, a instalação nunca substitui um perfil personalizado. Se
+houver outro perfil ativo, o built-in é criado inativo; se o ID já estiver ocupado
+por dados do usuário, a colisão é preservada e somente o marcador de instalação é
+registrado. Instalações anteriores com o built-in v1 intacto recebem uma única
+revisão v2 com os dois controles de telemetria; perfil editado ou removido pelo
+usuário é preservado e não é recriado. A migração para o schema 5 é idempotente e
 executada dentro da transação do banco.
 
 ## API HTTP de perfil
@@ -233,7 +249,7 @@ A API fica sob `/api/v1`:
 - `GET /api/v1/profiles/{profile_id}/snapshot` retorna um snapshot; use
   `?revision=N` para revisão histórica (`N >= 1`).
 - `GET /api/v1/actions` retorna o catálogo fechado: `hotkey`, `key`, `media`,
-  `text`, `url`, `application`.
+  `text`, `url`, `application`, `system_info`.
 - `PUT /api/v1/profiles/{profile_id}?expected_revision=N` valida e persiste a
   próxima revisão.
 
@@ -256,8 +272,8 @@ snapshot persistido.
 ## Execução de ações — perfil essencial
 
 O registry permanece fechado. Os adaptadores validados cobrem `key`, `media`,
-`text`, `url` e `application`; nenhum tipo aceita shell, caminho livre ou payload
-executável enviado pelo Android.
+`text`, `url`, `application` e `system_info`; nenhum tipo aceita shell, caminho
+livre, consulta WMI ou payload executável enviado pelo Android.
 
 O catálogo de aplicações é separado do catálogo de tipos: a única entrada de
 produção é o ID `chrome`, exibido como `Google Chrome`. O cliente envia somente
@@ -270,7 +286,7 @@ rejeição segura.
 `VK_SNAPSHOT` (`0x2C`), com evento down/up. O comportamento do Windows coloca a
 captura no clipboard; o servidor não salva, transmite nem registra a imagem.
 
-Os oito controles do perfil inicial são:
+Os dez controles do perfil inicial são:
 
 | Controle | Ação fechada |
 | --- | --- |
@@ -282,12 +298,24 @@ Os oito controles do perfil inicial são:
 | Volume + | `media/volume_up` |
 | Volume − | `media/volume_down` |
 | Print Screen | `key/PRINTSCREEN` |
+| CPU & Temp | `system_info/cpu` — `GetSystemTimes` e zona térmica ACPI/WMI, que não equivale necessariamente ao pacote da CPU; `N/A` sem leitura plausível |
+| Memória | `system_info/memory` — carga e RAM física disponível/total via `GlobalMemoryStatusEx` |
 
 O tile Spotify usa a sessão multimídia global do Windows; ele não implementa
-Spotify OAuth nem garante exclusividade sobre outros players.
+Spotify OAuth nem garante exclusividade sobre outros players. A telemetria não
+aceita uma consulta, classe WMI ou comando vindo do Android; os alvos válidos são
+somente `cpu`, `memory` e `gpu`.
 
 O cliente Android valida o snapshot e envia somente IDs/revisão no `press`.
-A página inicial é 3 × 3, e a nona célula é vazia e não clicável.
+A página inicial é 3 × 4 e contém os onze controles acima. O botão `system-gpu`
+retorna `GPU: <temperatura> | VRAM: <usada>/<total> GB (<percentual>%)` ou
+`GPU: N/A | VRAM: N/A` quando nenhum provider compatível estiver disponível.
+
+O provider NVIDIA usa NVML por binding Python, sem executar `nvidia-smi`. O
+provider AMD opcional usa uma bridge NativeAOT .NET 8 com
+`LibreHardwareMonitorLib` 0.9.6 (MPL-2.0), sem redistribuir SDK ou DLL
+proprietária do driver. O processo continua iniciando sem GPU, driver, DLL ou
+sensor compatível; veja `THIRD-PARTY-NOTICES.md` e `LICENSES/MPL-2.0.txt`.
 
 O modo `STREAMDECK_ACTION_MODE=recording` existe apenas para o harness isolado
 de UI/protocolo: valida as mesmas ações, registra o tipo em memória e não abre

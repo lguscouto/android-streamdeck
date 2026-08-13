@@ -8,6 +8,7 @@ import br.com.gustavo.streamdeck.network.StreamDeckKeyAction
 import br.com.gustavo.streamdeck.network.StreamDeckMediaAction
 import br.com.gustavo.streamdeck.network.StreamDeckPage
 import br.com.gustavo.streamdeck.network.StreamDeckProfileSnapshot
+import br.com.gustavo.streamdeck.network.StreamDeckSystemInfoAction
 import br.com.gustavo.streamdeck.network.StreamDeckTextAction
 import br.com.gustavo.streamdeck.network.StreamDeckUrlAction
 
@@ -18,6 +19,7 @@ enum class EditorActionType {
     TEXT,
     URL,
     APPLICATION,
+    SYSTEM_INFO,
 }
 
 data class ProfileEditorDraft(
@@ -48,6 +50,7 @@ data class ProfileEditorDraft(
             EditorActionType.TEXT -> "" to "Texto"
             EditorActionType.URL -> "" to "https://example.com"
             EditorActionType.APPLICATION -> "" to "app"
+            EditorActionType.SYSTEM_INFO -> "" to "cpu"
         }
         return copy(
             actionType = nextType,
@@ -152,6 +155,12 @@ data class ProfileEditorDraft(
                 require(STABLE_ID.matches(value)) { "Application ID is invalid" }
                 StreamDeckApplicationAction(value)
             }
+            EditorActionType.SYSTEM_INFO -> {
+                require(value in ALLOWED_SYSTEM_INFO_TARGETS) {
+                    "System information target is not supported"
+                }
+                StreamDeckSystemInfoAction(value)
+            }
         }
     }
 
@@ -197,6 +206,7 @@ data class ProfileEditorDraft(
             "volume_down",
             "mute",
         )
+        private val ALLOWED_SYSTEM_INFO_TARGETS = setOf("cpu", "memory", "gpu")
         private const val MAX_KEY_LENGTH = 32
         private const val MAX_TEXT_LENGTH = 2000
     }
@@ -210,6 +220,7 @@ private val StreamDeckAction.editorType: EditorActionType
         is StreamDeckTextAction -> EditorActionType.TEXT
         is StreamDeckUrlAction -> EditorActionType.URL
         is StreamDeckApplicationAction -> EditorActionType.APPLICATION
+        is StreamDeckSystemInfoAction -> EditorActionType.SYSTEM_INFO
     }
 
 private val StreamDeckAction.editorValue: String
@@ -220,4 +231,5 @@ private val StreamDeckAction.editorValue: String
         is StreamDeckTextAction -> text
         is StreamDeckUrlAction -> url
         is StreamDeckApplicationAction -> appId
+        is StreamDeckSystemInfoAction -> target
     }

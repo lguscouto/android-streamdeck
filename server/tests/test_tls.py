@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import multiprocessing
 import os
 import re
@@ -70,6 +71,35 @@ def test_tls_leaf_authority_key_identifier_matches_private_ca(tmp_path) -> None:
     assert (
         leaf_authority_key_identifier.key_identifier == ca_subject_key_identifier.digest
     )
+
+
+def test_tls_material_renews_leaf_when_server_identities_expand(tmp_path) -> None:
+    state_dir = tmp_path / "tls"
+    first = TlsMaterialStore(
+        state_dir=state_dir,
+        identities=("192.168.50.10",),
+    ).ensure()
+    first_ca = first.ca_certificate_path.read_bytes()
+    first_leaf = first.certificate_path.read_bytes()
+
+    expanded = TlsMaterialStore(
+        state_dir=state_dir,
+        identities=("192.168.50.10", "127.0.0.1"),
+    ).ensure()
+
+    assert expanded.ca_certificate_path.read_bytes() == first_ca
+    assert expanded.trust_code == first.trust_code
+    assert expanded.certificate_path.read_bytes() != first_leaf
+    leaf_certificate = x509.load_pem_x509_certificate(
+        expanded.certificate_path.read_bytes()
+    )
+    alternative_names = leaf_certificate.extensions.get_extension_for_class(
+        x509.SubjectAlternativeName
+    ).value
+    assert alternative_names.get_values_for_type(x509.IPAddress) == [
+        ipaddress.ip_address("192.168.50.10"),
+        ipaddress.ip_address("127.0.0.1"),
+    ]
 
 
 def test_tls_material_renews_only_leaf_before_expiry(tmp_path) -> None:

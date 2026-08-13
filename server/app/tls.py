@@ -35,6 +35,10 @@ class TlsMaterialError(RuntimeError):
     """Raised when local TLS material is absent, incomplete, or invalid."""
 
 
+class _TlsLeafIdentityMismatch(TlsMaterialError):
+    """Signals that a valid leaf must be renewed for a changed identity set."""
+
+
 @dataclass(frozen=True, slots=True)
 class TlsMaterial:
     ca_certificate_path: Path
@@ -90,15 +94,23 @@ class TlsMaterialStore:
         elif present_count != len(paths):
             raise TlsMaterialError("TLS material is incomplete")
         else:
-            ca_certificate, ca_key, leaf_certificate = _load_and_validate_material(
-                ca_certificate_path,
-                ca_private_key_path,
-                certificate_path,
-                private_key_path,
-                self._identities,
-                now,
-            )
-            if _leaf_needs_renewal(leaf_certificate, now):
+            try:
+                ca_certificate, ca_key, leaf_certificate = _load_and_validate_material(
+                    ca_certificate_path,
+                    ca_private_key_path,
+                    certificate_path,
+                    private_key_path,
+                    self._identities,
+                    now,
+                )
+            except _TlsLeafIdentityMismatch:
+                ca_certificate = _load_certificate(
+                    ca_certificate_path, "CA certificate"
+                )
+                ca_key = _load_private_key(ca_private_key_path, "CA private key")
+                _validate_ca(ca_certificate, ca_key, now)
+                leaf_certificate = None
+            if leaf_certificate is None or _leaf_needs_renewal(leaf_certificate, now):
                 _write_leaf(
                     certificate_path,
                     private_key_path,
@@ -404,18 +416,21 @@ def _validate_leaf(
     except x509.ExtensionNotFound as exc:
         raise TlsMaterialError("TLS leaf certificate is invalid") from exc
     common_names = certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)
-    if len(common_names) != 1 or common_names[0].value != identities[0]:
-        raise TlsMaterialError("TLS leaf certificate is invalid")
+    identities_changed = (
+        len(common_names) != 1 or common_names[0].value != identities[0]
+    )
     if constraints.ca or usage.key_cert_sign or not usage.digital_signature:
         raise TlsMaterialError("TLS leaf certificate is invalid")
     if ExtendedKeyUsageOID.SERVER_AUTH not in extended_usage:
         raise TlsMaterialError("TLS leaf certificate is invalid")
     if _general_name_values(subject_alternative_names) != _identity_values(identities):
-        raise TlsMaterialError("TLS leaf certificate SANs are invalid")
+        identities_changed = True
     if subject_key_identifier.digest != _subject_key_identifier(certificate):
         raise TlsMaterialError("TLS leaf certificate is invalid")
     if authority_key_identifier.key_identifier != ca_subject_key_identifier.digest:
         raise TlsMaterialError("TLS leaf certificate is invalid")
+    if identities_changed:
+        raise _TlsLeafIdentityMismatch("TLS leaf certificate identities changed")
 
 
 def _verify_signature(

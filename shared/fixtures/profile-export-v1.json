@@ -21,7 +21,10 @@
           "color": "#4CAF50",
           "action": {
             "type": "hotkey",
-            "modifiers": ["ctrl", "shift"],
+            "modifiers": [
+              "ctrl",
+              "shift"
+            ],
             "key": "S"
           }
         },
@@ -82,7 +85,7 @@
       "title": "Secundária",
       "order": 1,
       "rows": 1,
-      "columns": 1,
+      "columns": 3,
       "buttons": [
         {
           "id": "mute",
@@ -93,6 +96,26 @@
           "action": {
             "type": "media",
             "command": "mute"
+          }
+        },
+        {
+          "id": "system-cpu",
+          "row": 0,
+          "column": 1,
+          "title": "CPU & Temp",
+          "action": {
+            "type": "system_info",
+            "target": "cpu"
+          }
+        },
+        {
+          "id": "system-memory",
+          "row": 0,
+          "column": 2,
+          "title": "Memória",
+          "action": {
+            "type": "system_info",
+            "target": "memory"
           }
         }
       ]

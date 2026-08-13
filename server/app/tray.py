@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import ipaddress
-import os
-import socket
 from collections.abc import Callable
 from typing import Any
 
-from app.config import Settings
+from app.config import Settings, resolve_pairing_server_ip
 from app.service_control import ServerProcessController
 
 
@@ -130,32 +127,13 @@ class TrayApplication:
         from app.pairing_window import PairingWindow
 
         settings = self.controller.settings
-        host = os.getenv("STREAMDECK_PAIRING_SERVER_IP")
+        if not settings.local_pairing_supported:
+            raise TrayUnavailableError(
+                "local pairing requires a bind with loopback access"
+            )
+        host = resolve_pairing_server_ip(settings)
         if host is None:
-            for identity in settings.tls_identities:
-                try:
-                    address = ipaddress.ip_address(identity)
-                except ValueError:
-                    continue
-                if (
-                    address.version == 4
-                    and address.is_private
-                    and not address.is_loopback
-                ):
-                    host = str(address)
-                    break
-        if host is None:
-            try:
-                resolved = ipaddress.ip_address(
-                    socket.gethostbyname(socket.gethostname())
-                )
-            except (OSError, ValueError) as exc:
-                raise TrayUnavailableError(
-                    "private pairing address is unavailable"
-                ) from exc
-            if resolved.version != 4 or not resolved.is_private or resolved.is_loopback:
-                raise TrayUnavailableError("private pairing address is unavailable")
-            host = str(resolved)
+            raise TrayUnavailableError("private pairing address is unavailable")
         return PairingWindow(
             self.controller,
             host=host,

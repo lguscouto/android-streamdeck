@@ -44,12 +44,24 @@ def fixtures_dir() -> Path:
 
 
 def essential_controls_profile_path() -> Path:
-    """Return the immutable built-in essential-controls profile fixture."""
+    """Return the immutable current essential-controls profile fixture."""
     return fixtures_dir() / "essential-controls-profile.json"
+
+
+def essential_controls_profile_v1_path() -> Path:
+    """Return the frozen v1 fixture used for non-destructive built-in upgrades."""
+    return fixtures_dir() / "essential-controls-profile-v1.json"
+
+
+def essential_controls_profile_v2_path() -> Path:
+    """Return the frozen v2 fixture used for non-destructive v3 upgrades."""
+    return fixtures_dir() / "essential-controls-profile-v2.json"
 
 
 __all__ = [
     "essential_controls_profile_path",
+    "essential_controls_profile_v1_path",
+    "essential_controls_profile_v2_path",
     "fixtures_dir",
     "protocol_dir",
     "repo_root",

@@ -3,8 +3,6 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import logging
-import os
-import socket
 from collections.abc import Callable
 from typing import Annotated, Any, Literal, TypeAlias
 
@@ -15,6 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import Field, ValidationError, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.config import resolve_pairing_server_ip
 from app.pairing import (
     PairingCodeInvalidError,
     PairingService,
@@ -52,14 +51,18 @@ from app.schemas import (
 )
 
 API_PREFIX = "/api/v1"
-ACTION_TYPES = ("hotkey", "key", "media", "text", "url", "application")
+ACTION_TYPES = (
+    "hotkey",
+    "key",
+    "media",
+    "text",
+    "url",
+    "application",
+    "system_info",
+)
 ACTION_CATALOG = {"actions": [{"type": action_type} for action_type in ACTION_TYPES]}
 LOGGER = logging.getLogger(__name__)
 MAX_PROFILE_IMPORT_BYTES = 512 * 1024
-_RFC1918_NETWORKS = tuple(
-    ipaddress.ip_network(network)
-    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
-)
 PairingCode: TypeAlias = Annotated[
     str,
     Field(min_length=6, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{5,63}$"),
@@ -322,27 +325,21 @@ def _is_loopback_request(request: Request) -> bool:
         return False
 
 
-def _resolve_pairing_server_ip(settings: Any) -> str:
-    candidates = [
-        os.getenv("STREAMDECK_PAIRING_SERVER_IP"),
-        *(getattr(settings, "tls_identities", ()) or ()),
-        getattr(settings, "host", None),
-    ]
-    try:
-        candidates.append(socket.gethostbyname(socket.gethostname()))
-    except OSError:
-        pass
-    for candidate in candidates:
-        if not candidate:
-            continue
-        try:
-            address = ipaddress.ip_address(candidate)
-        except ValueError:
-            continue
-        if address.version == 4 and any(
-            address in network for network in _RFC1918_NETWORKS
-        ):
-            return str(address)
+def _resolve_pairing_server_ip(
+    settings: Any,
+    *,
+    override: str | None = None,
+) -> str:
+    if not getattr(settings, "local_pairing_supported", False):
+        raise APIError(
+            503,
+            "PAIRING_UNAVAILABLE",
+            "Pairing is unavailable",
+            True,
+        )
+    server_ip = resolve_pairing_server_ip(settings, override=override)
+    if server_ip is not None:
+        return server_ip
     raise APIError(
         503,
         "PAIRING_SERVER_ADDRESS_UNAVAILABLE",
@@ -821,8 +818,9 @@ def create_router(
                 "Pairing is unavailable",
                 True,
             )
-        server_ip = pairing_server_ip or _resolve_pairing_server_ip(
-            request.app.state.settings
+        server_ip = _resolve_pairing_server_ip(
+            request.app.state.settings,
+            override=pairing_server_ip,
         )
         try:
             presentation = pairing_session_manager.create_session(

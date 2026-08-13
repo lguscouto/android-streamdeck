@@ -53,3 +53,5 @@ adb-dumps/
 Thumbs.db
 .idea/
 .vscode/
+server/native/gpu_telemetry_bridge/bin/
+server/native/gpu_telemetry_bridge/obj/

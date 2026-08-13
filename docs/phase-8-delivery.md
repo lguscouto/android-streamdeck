@@ -94,9 +94,11 @@ O manifesto mesclado do release deve manter `usesCleartextTraffic=false` e
 
 - **Loopback:** o modo local pode usar HTTP/WS somente para desenvolvimento
   controlado; o cliente Android continua aceitando apenas HTTPS/WSS.
-- **LAN:** `STREAMDECK_HOST=0.0.0.0` exige
-  `STREAMDECK_REQUIRE_AUTH=true` e `STREAMDECK_TLS_MODE=required`; consulte
-  `server/README.md` e [`docs/architecture.md`](architecture.md).
+- **LAN físico:** use um IPv4 RFC1918 concreto em `STREAMDECK_HOST`; ele exige
+  `STREAMDECK_REQUIRE_AUTH=true` e `STREAMDECK_TLS_MODE=required`. Para o
+  Android Emulator, `0.0.0.0` é uma exceção controlada, com `10.0.2.2` na
+  identidade TLS. Consulte `server/README.md` e
+  [`docs/architecture.md`](architecture.md).
 - O Android valida a prova HMAC do bootstrap antes de instalar a CA restrita;
   hostname/SAN continua sendo verificado pelo TLS padrão. Não há trust-on-first-use.
 

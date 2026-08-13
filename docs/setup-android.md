@@ -64,7 +64,7 @@ O A10 continua não identificado e não medido.
 2. Confirmar que o destino autorizado aparece em `adb devices -l`.
 3. Repetir `adb shell getprop ro.product.model`, `adb shell getprop ro.build.version.sdk`, `adb shell wm size` e `adb shell wm density`, registrando os valores reais neste documento e na matriz de `docs/architecture.md`.
 4. Comparar a API medida com o `minSdk 26` provisório e ajustar o `minSdk` conforme a política de suporte; não deduzir a API a partir do nome “A10”.
-5. Usar tamanho e densidade medidos para validar a grade inicial de 3 × 3 e ajustar o default configurável se necessário.
+5. Usar tamanho e densidade medidos para validar a grade inicial de 3 × 4 e ajustar o default configurável se necessário.
 6. A combinação Kotlin `2.0.21`, AGP `8.8.2`, Gradle `8.10.2`, `compileSdk 35`, `targetSdk 35` e build-tools `35.0.0` foi exercitada em builds reais de debug e release. Isso não substitui a validação física de compatibilidade no A10.
 
 Até essa revisão, o `minSdk 26` é apenas uma escolha provisória para o esqueleto compilável e não uma afirmação de compatibilidade final com o A10.
@@ -243,6 +243,11 @@ conter o endereço usado no SAN. O tray/janela local oferece **Parear dispositiv
 e emite uma senha temporária ou QR versionado, válido por 10 minutos e de uso
 único. A senha não é persistida e não deve ser colocada em arquivos de projeto,
 variáveis de ambiente do Gradle, URLs de logs ou linha de comando.
+
+No bind por IPv4 privado concreto, o runner também abre `127.0.0.1` na mesma
+porta para a chamada administrativa do tray, sem usar wildcard nem alterar o
+endereço apresentado ao Android. Origens da rede continuam bloqueadas pela
+restrição `LOCAL_ONLY`.
 
 O manifesto principal e o fluxo normal Android mantêm `usesCleartextTraffic=false`.
 A descoberta mDNS é apenas auxiliar e não substitui o primeiro pareamento nem a

@@ -1,18 +1,27 @@
 from __future__ import annotations
 
 import ctypes
+import gc
+import math
+import os
 import sys
+import time
 from collections.abc import Callable
+from ctypes import wintypes
 from dataclasses import dataclass
+from pathlib import Path
+from threading import BoundedSemaphore
 from typing import Literal, Protocol
 
 from app.catalog import ApplicationCatalog
+from app.gpu_telemetry import GpuTelemetry, read_primary_gpu
 from app.schemas import (
     Action,
     ApplicationAction,
     HotkeyAction,
     KeyAction,
     MediaAction,
+    SystemInfoAction,
     TextAction,
     UrlAction,
 )
@@ -104,6 +113,8 @@ def _recording_label(action: Action) -> str:
         return f"key/{action.key}"
     if isinstance(action, ApplicationAction):
         return f"application/{action.app_id}"
+    if isinstance(action, SystemInfoAction):
+        return f"system_info/{action.target}"
     if isinstance(action, HotkeyAction):
         return "hotkey/closed"
     if isinstance(action, TextAction):
@@ -131,6 +142,10 @@ class TextAdapter(Protocol):
 
 class UrlAdapter(Protocol):
     def execute(self, action: UrlAction) -> None: ...
+
+
+class SystemInfoAdapter(Protocol):
+    def execute(self, action: SystemInfoAction) -> str: ...
 
 
 class ActionExecutor(Protocol):
@@ -203,6 +218,239 @@ class WindowsMediaAdapter:
                 _release_key_safely(self._emit_key, virtual_key)
 
 
+class _MemoryStatusEx(ctypes.Structure):
+    """Win32 ``MEMORYSTATUSEX`` with 64-bit physical-memory counters."""
+
+    _fields_ = [
+        ("dwLength", ctypes.c_ulong),
+        ("dwMemoryLoad", ctypes.c_ulong),
+        ("ullTotalPhys", ctypes.c_ulonglong),
+        ("ullAvailPhys", ctypes.c_ulonglong),
+        ("ullTotalPageFile", ctypes.c_ulonglong),
+        ("ullAvailPageFile", ctypes.c_ulonglong),
+        ("ullTotalVirtual", ctypes.c_ulonglong),
+        ("ullAvailVirtual", ctypes.c_ulonglong),
+        ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+    ]
+
+
+class WindowsSystemInfoAdapter:
+    """Read a small, closed set of Windows telemetry without shell access.
+
+    ``system_info`` is deliberately not a generic diagnostics capability: the
+    validated action selects only CPU or physical-memory telemetry. CPU usage is
+    sampled from two ``GetSystemTimes`` snapshots; temperature is best-effort
+    WMI data and is reported as ``N/A`` when firmware does not expose a thermal
+    zone. Values outside a conservative -50..150 °C plausibility range are also
+    reported as unavailable. ACPI zones do not necessarily represent the CPU
+    package. No client-supplied command, WMI query, path, or process is accepted.
+    """
+
+    _BYTES_PER_GIBIBYTE = 1024**3
+
+    def __init__(
+        self,
+        *,
+        read_system_times: Callable[[], tuple[int, int, int]] | None = None,
+        read_memory_status: Callable[[], tuple[int, int, int]] | None = None,
+        read_thermal_zone_temperatures: Callable[[], list[int | float]] | None = None,
+        read_gpu_telemetry: Callable[[], GpuTelemetry | None] | None = None,
+        sleep: Callable[[float], None] | None = None,
+        sample_interval_seconds: float = 0.1,
+        max_concurrent_executions: int = 2,
+    ) -> None:
+        if sample_interval_seconds < 0:
+            raise ValueError("sample_interval_seconds must not be negative")
+        if max_concurrent_executions < 1:
+            raise ValueError("max_concurrent_executions must be positive")
+        self._read_system_times = read_system_times or _read_windows_system_times
+        self._read_memory_status = read_memory_status or _read_windows_memory_status
+        self._read_thermal_zone_temperatures = (
+            read_thermal_zone_temperatures or _read_windows_thermal_zone_temperatures
+        )
+        self._read_gpu_telemetry = read_gpu_telemetry or read_primary_gpu
+        self._sleep = sleep or time.sleep
+        self._sample_interval_seconds = sample_interval_seconds
+        self._execution_slots = BoundedSemaphore(max_concurrent_executions)
+
+    def execute(self, action: SystemInfoAction) -> str:
+        if not self._execution_slots.acquire(blocking=False):
+            raise ActionExecutionRejected("System information is busy")
+        try:
+            try:
+                if action.target == "cpu":
+                    return self._cpu_message()
+                if action.target == "memory":
+                    return self._memory_message()
+                if action.target == "gpu":
+                    return self._gpu_message()
+            except ActionExecutionRejected:
+                raise
+            except Exception as exc:
+                raise ActionExecutionRejected(
+                    "System information could not be read"
+                ) from exc
+            raise ActionExecutionRejected("System information target is not supported")
+        finally:
+            self._execution_slots.release()
+
+    def _cpu_message(self) -> str:
+        first_idle, first_kernel, first_user = self._read_system_times()
+        self._sleep(self._sample_interval_seconds)
+        second_idle, second_kernel, second_user = self._read_system_times()
+
+        first_total = first_kernel + first_user
+        second_total = second_kernel + second_user
+        total_delta = second_total - first_total
+        idle_delta = second_idle - first_idle
+        if total_delta <= 0 or idle_delta < 0:
+            raise ActionExecutionRejected("System information could not be read")
+
+        busy_delta = min(total_delta, max(0, total_delta - idle_delta))
+        cpu_percent = round((busy_delta * 100) / total_delta)
+        temperature = self._best_effort_temperature_celsius()
+        temperature_label = f"{temperature}°C" if temperature is not None else "N/A"
+        return f"CPU: {cpu_percent}% | {temperature_label}"
+
+    def _memory_message(self) -> str:
+        memory_percent, total_bytes, available_bytes = self._read_memory_status()
+        if total_bytes <= 0 or not 0 <= available_bytes <= total_bytes:
+            raise ActionExecutionRejected("System information could not be read")
+        memory_percent = min(100, max(0, memory_percent))
+        available_gib = available_bytes / self._BYTES_PER_GIBIBYTE
+        total_gib = total_bytes / self._BYTES_PER_GIBIBYTE
+        return f"RAM: {memory_percent}% ({available_gib:.1f}/{total_gib:.1f} GB)"
+
+    def _gpu_message(self) -> str:
+        telemetry = self._read_gpu_telemetry()
+        if telemetry is None:
+            return "GPU: N/A | VRAM: N/A"
+
+        temperature = telemetry.temperature_celsius
+        temperature_label = (
+            f"{temperature}°C"
+            if temperature is not None and 0 <= temperature <= 150
+            else "N/A"
+        )
+        used = telemetry.used_bytes
+        total = telemetry.total_bytes
+        if used is None or total is None or total <= 0 or not 0 <= used <= total:
+            vram_label = "N/A"
+        else:
+            percent = min(100, max(0, round(used * 100 / total)))
+            vram_label = (
+                f"{used / self._BYTES_PER_GIBIBYTE:.1f}/"
+                f"{total / self._BYTES_PER_GIBIBYTE:.1f} GB ({percent}%)"
+            )
+        return f"GPU: {temperature_label} | VRAM: {vram_label}"
+
+    def _best_effort_temperature_celsius(self) -> int | None:
+        try:
+            raw_temperatures = self._read_thermal_zone_temperatures()
+        except Exception:
+            return None
+
+        celsius_values = [
+            celsius
+            for temperature in raw_temperatures
+            if isinstance(temperature, (int, float))
+            and math.isfinite(temperature)
+            and temperature > 0
+            and -50 <= (celsius := round(temperature / 10 - 273.15)) <= 150
+        ]
+        return max(celsius_values, default=None)
+
+
+def _read_windows_system_times() -> tuple[int, int, int]:
+    """Return idle, kernel, and user time in 100-nanosecond Win32 ticks."""
+
+    if sys.platform != "win32":
+        raise ActionExecutionRejected("System telemetry requires Windows")
+
+    idle = wintypes.FILETIME()
+    kernel = wintypes.FILETIME()
+    user = wintypes.FILETIME()
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetSystemTimes.argtypes = [
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+        ctypes.POINTER(wintypes.FILETIME),
+    ]
+    kernel32.GetSystemTimes.restype = wintypes.BOOL
+    if not kernel32.GetSystemTimes(
+        ctypes.byref(idle),
+        ctypes.byref(kernel),
+        ctypes.byref(user),
+    ):
+        raise OSError(ctypes.get_last_error(), "GetSystemTimes failed")
+    return tuple(
+        (file_time.dwHighDateTime << 32) | file_time.dwLowDateTime
+        for file_time in (idle, kernel, user)
+    )
+
+
+def _read_windows_memory_status() -> tuple[int, int, int]:
+    """Return percentage used, total physical bytes, and available physical bytes."""
+
+    if sys.platform != "win32":
+        raise ActionExecutionRejected("System telemetry requires Windows")
+
+    status = _MemoryStatusEx()
+    status.dwLength = ctypes.sizeof(_MemoryStatusEx)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GlobalMemoryStatusEx.argtypes = [ctypes.POINTER(_MemoryStatusEx)]
+    kernel32.GlobalMemoryStatusEx.restype = wintypes.BOOL
+    if not kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+        raise OSError(ctypes.get_last_error(), "GlobalMemoryStatusEx failed")
+    total_bytes = int(status.ullTotalPhys)
+    available_bytes = int(status.ullAvailPhys)
+    return int(status.dwMemoryLoad), total_bytes, available_bytes
+
+
+def _read_windows_thermal_zone_temperatures() -> list[int | float]:
+    """Read fixed WMI thermal-zone values in tenths of Kelvin when available."""
+
+    if sys.platform != "win32":
+        return []
+    try:
+        import pythoncom
+        import win32com.client
+    except Exception:
+        return []
+
+    # Starlette runs action execution in a worker thread. COM must be
+    # initialized in that same thread before the WMI client is created.
+    pythoncom.CoInitialize()
+    try:
+        temperatures = _query_windows_thermal_zone_temperatures(win32com.client)
+        # On unsupported firmware, WMI can leave cyclic exception wrappers
+        # holding COM references. Collect them before balancing CoInitialize.
+        gc.collect()
+        return temperatures
+    finally:
+        pythoncom.CoUninitialize()
+
+
+def _query_windows_thermal_zone_temperatures(wmi_module: object) -> list[int | float]:
+    """Keep WMI exceptions scoped so COM wrappers die before CoUninitialize."""
+
+    try:
+        get_object = getattr(wmi_module, "GetObject")
+        connection = get_object(
+            r"winmgmts:{impersonationLevel=impersonate}!\\.\root\WMI"
+        )
+        zones = connection.ExecQuery(
+            "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature"
+        )
+        return [
+            temperature
+            for zone in zones
+            if (temperature := getattr(zone, "CurrentTemperature", None)) is not None
+        ]
+    except Exception:
+        return []
+
+
 class WindowsTextAdapter:
     """Type validated text through Win32 Unicode input, without a shell."""
 
@@ -257,10 +505,32 @@ _default_application_catalog = default_application_catalog
 def _open_windows_application(executable: str) -> None:
     if sys.platform != "win32":
         raise ActionExecutionRejected("Application execution requires Windows")
+    if Path(executable).name.lower() != executable.lower():
+        raise ActionExecutionRejected("Application executable is not available")
+    candidates_by_name = {
+        "chrome.exe": (
+            Path(os.environ.get("PROGRAMFILES", ""))
+            / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("PROGRAMFILES(X86)", ""))
+            / "Google/Chrome/Application/chrome.exe",
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "Google/Chrome/Application/chrome.exe",
+        ),
+    }
+    executable_path = next(
+        (
+            candidate.resolve()
+            for candidate in candidates_by_name.get(executable.lower(), ())
+            if candidate.is_absolute() and candidate.is_file()
+        ),
+        None,
+    )
+    if executable_path is None:
+        raise ActionExecutionRejected("Application executable is not available")
     result = ctypes.windll.shell32.ShellExecuteW(
         None,
         "open",
-        executable,
+        str(executable_path),
         None,
         None,
         1,
@@ -421,6 +691,7 @@ class ActionRegistry:
         media_adapter: MediaAdapter | None = None,
         text_adapter: TextAdapter | None = None,
         url_adapter: UrlAdapter | None = None,
+        system_info_adapter: SystemInfoAdapter | None = None,
         application_catalog: ApplicationCatalog | None = None,
         application_adapter: WindowsApplicationAdapter | None = None,
     ) -> None:
@@ -429,6 +700,7 @@ class ActionRegistry:
         self._media_adapter = media_adapter or WindowsMediaAdapter()
         self._text_adapter = text_adapter or WindowsTextAdapter()
         self._url_adapter = url_adapter or WindowsUrlAdapter()
+        self._system_info_adapter = system_info_adapter or WindowsSystemInfoAdapter()
         self._application_adapter = application_adapter or WindowsApplicationAdapter(
             catalog=application_catalog
         )
@@ -452,6 +724,11 @@ class ActionRegistry:
         if isinstance(action, ApplicationAction):
             self._application_adapter.execute(action)
             return ActionExecutionResult(status="completed", message="Action completed")
+        if isinstance(action, SystemInfoAction):
+            return ActionExecutionResult(
+                status="completed",
+                message=self._system_info_adapter.execute(action),
+            )
         raise ActionExecutionRejected("Action type is not enabled")
 
 
@@ -463,12 +740,14 @@ __all__ = [
     "RecordingActionExecutor",
     "KeyAdapter",
     "MediaAdapter",
+    "SystemInfoAdapter",
     "TextAdapter",
     "UrlAdapter",
     "WindowsApplicationAdapter",
     "WindowsHotkeyAdapter",
     "WindowsKeyAdapter",
     "WindowsMediaAdapter",
+    "WindowsSystemInfoAdapter",
     "WindowsTextAdapter",
     "WindowsUrlAdapter",
 ]

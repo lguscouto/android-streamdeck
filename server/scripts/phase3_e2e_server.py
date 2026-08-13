@@ -16,12 +16,20 @@ from app.actions import (
     HotkeyAdapter,
     KeyAdapter,
     MediaAdapter,
+    SystemInfoAdapter,
     TextAdapter,
     UrlAdapter,
 )
 from app.config import Settings
 from app.main import create_app
-from app.schemas import HotkeyAction, KeyAction, MediaAction, TextAction, UrlAction
+from app.schemas import (
+    HotkeyAction,
+    KeyAction,
+    MediaAction,
+    SystemInfoAction,
+    TextAction,
+    UrlAction,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +63,14 @@ class RecordingUrlAdapter(UrlAdapter):
         LOGGER.warning("PHASE4_E2E_RECORDED_URL host=%s", action.url.split("/", 3)[2])
 
 
+class RecordingSystemInfoAdapter(SystemInfoAdapter):
+    def execute(self, action: SystemInfoAction) -> str:
+        LOGGER.warning("PHASE4_E2E_RECORDED_SYSTEM_INFO target=%s", action.target)
+        if action.target == "cpu":
+            return "CPU: 42% | N/A"
+        return "RAM: 47% (8.5/16.0 GB)"
+
+
 def main() -> None:
     settings = Settings.from_env()
     application = create_app(
@@ -65,6 +81,7 @@ def main() -> None:
             media_adapter=RecordingMediaAdapter(),
             text_adapter=RecordingTextAdapter(),
             url_adapter=RecordingUrlAdapter(),
+            system_info_adapter=RecordingSystemInfoAdapter(),
         ),
     )
     uvicorn.run(

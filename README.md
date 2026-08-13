@@ -24,8 +24,8 @@ O projeto é voltado a quem quer atalhos físicos no celular, operação local e
 | Aplicativo | Android nativo em Kotlin com Jetpack Compose e cliente OkHttp |
 | Servidor | Python com FastAPI e WebSocket, executado no Windows |
 | Persistência | SQLite local para perfis, configurações e histórico mínimo necessário |
-| Painel inicial | Perfil `essential-controls` (`Controles essenciais`), grade 3 × 3, oito controles e uma célula vazia |
-| Ações | Catálogos fechados para teclas, mídia, texto, URL e aplicações habilitadas |
+| Painel inicial | Perfil `essential-controls` (`Controles essenciais`), grade 3 × 4 com dez controles, incluindo CPU e memória |
+| Ações | Catálogos fechados para teclas, mídia, texto, URL, aplicações habilitadas e telemetria do sistema |
 | Mídia e volume | Play/Pause, próxima, mute, volume + e volume − via adaptadores Windows |
 | Chrome | Aplicação selecionada por `app_id=chrome`, resolvida internamente como `chrome.exe` |
 | Print Screen | Tecla Windows `PRINTSCREEN`/`VK_SNAPSHOT`; a captura permanece no clipboard do Windows |
@@ -37,7 +37,7 @@ O projeto é voltado a quem quer atalhos físicos no celular, operação local e
 
 ## Perfil inicial: Controles essenciais
 
-Em uma instalação nova, o servidor instala de forma idempotente o perfil `essential-controls` (`Controles essenciais`). A página `Principal` usa uma grade 3 × 3; a nona célula é vazia e não interativa.
+Em uma instalação nova, o servidor instala de forma idempotente o perfil `essential-controls` (`Controles essenciais`). A página `Principal` usa uma grade 3 × 4 com dez controles.
 
 | Controle | Ação registrada |
 | --- | --- |
@@ -49,6 +49,8 @@ Em uma instalação nova, o servidor instala de forma idempotente o perfil `esse
 | Volume + | `media/volume_up` |
 | Volume − | `media/volume_down` |
 | Print Screen | `key/PRINTSCREEN` |
+| CPU & Temp | `system_info/cpu` — uso de CPU e temperatura da zona térmica ACPI/WMI quando o firmware a expõe; não equivale necessariamente à temperatura do pacote da CPU e retorna `N/A` quando indisponível |
+| Memória | `system_info/memory` — carga, RAM disponível e RAM física total |
 
 O controle **Spotify** atua sobre a sessão de mídia global ativa do Windows. Ele não implementa OAuth e não promete exclusividade sobre o Spotify. O controle **Chrome** depende de o Chrome estar disponível no computador; o cliente não fornece executável, caminho nem argumentos.
 
@@ -118,9 +120,7 @@ A configuração padrão usa `127.0.0.1:8765` para desenvolvimento e diagnóstic
 - **Emulador Android:** use a configuração segura com `10.0.2.2` descrita em [Uso local e no emulador](#uso-local-e-no-emulador).
 - **Celular físico:** use o IPv4 privado do Windows, a configuração TLS/SAN e a regra de firewall descritas em [Uso com celular na rede privada](#uso-com-celular-na-rede-privada).
 
-Depois da configuração, a interface do tray oferece **Parear dispositivo**; porém, no checkout atual, conclua o pareamento pelo workaround manual abaixo, usando no Android o código e o endereço retornados pelo comando. Depois, abra o perfil **Controles essenciais**.
-
-> **Limitação conhecida do checkout atual:** a janela de pareamento do tray acessa a rota local pelo IP privado exibido, enquanto o servidor aceita essa rota somente quando a origem é loopback. Um probe isolado reproduziu `403 LOCAL_ONLY` nessa combinação. Por isso, o pareamento automático pela janela do tray ainda não deve ser tratado como validado; use o workaround manual abaixo até que esse caminho seja corrigido no código.
+Depois da configuração, escolha **Parear dispositivo** no tray. A janela cria a sessão administrativa por loopback, sem expor essa rota à rede, e exibe o endereço privado, a senha temporária e o QR para o Android. Depois, abra o perfil **Controles essenciais**.
 
 O tray controla somente o processo que ele próprio iniciou. O banco SQLite, o estado TLS e os logs ficam fora da pasta do pacote, por padrão em `%LOCALAPPDATA%\AndroidStreamDeck`.
 
@@ -128,10 +128,10 @@ O tray controla somente o processo que ele próprio iniciou. O banco SQLite, o e
 
 Por padrão, o servidor executado diretamente escuta em `127.0.0.1:8765`. Esse modo é útil para verificar o processo e os endpoints locais, mas não oferece o endereço remoto exigido pela janela de pareamento.
 
-No emulador Android padrão, o host Windows é acessado pelo endereço `10.0.2.2`. Em uma sessão do PowerShell aberta na pasta do pacote, configure o bind remoto antes de iniciar o tray:
+No emulador Android padrão, o host Windows é acessado pelo endereço `10.0.2.2`. Em uma sessão do PowerShell aberta na pasta do pacote, configure o bind do emulador antes de iniciar o tray:
 
 ```powershell
-$env:STREAMDECK_HOST = "0.0.0.0"
+$env:STREAMDECK_HOST = "0.0.0.0" # wildcard somente para o emulador Android
 $env:STREAMDECK_PORT = "8765"
 $env:STREAMDECK_REQUIRE_AUTH = "true"
 $env:STREAMDECK_TLS_MODE = "required"
@@ -141,43 +141,29 @@ $env:STREAMDECK_ADMIN_CODE = Read-Host "Código administrativo"
 .\streamdeck-tray.exe
 ```
 
-O certificado usado pelo fluxo seguro precisa conter `10.0.2.2` no SAN, e o endpoint do aplicativo deve usar HTTPS/WSS. Com o tray iniciado nessa sessão, escolha **Iniciar servidor** e use o workaround manual abaixo; não trate a janela **Parear dispositivo** como validada no checkout atual. A configuração detalhada de bootstrap TLS e do emulador está em [Fase 7 — transporte LAN seguro](docs/phase-7-delivery.md) e [Diagnóstico do ambiente Android e Python](docs/setup-android.md).
+O certificado usado pelo fluxo seguro contém `10.0.2.2` e `127.0.0.1` no SAN: a primeira identidade atende o Android e a segunda protege o canal administrativo local do tray. O endpoint do aplicativo continua usando HTTPS/WSS em `10.0.2.2`. Com o tray iniciado nessa sessão, escolha **Iniciar servidor** e **Parear dispositivo**. A configuração detalhada de bootstrap TLS e do emulador está em [Fase 7 — transporte LAN seguro](docs/phase-7-delivery.md) e [Diagnóstico do ambiente Android e Python](docs/setup-android.md).
 
-Para contornar a limitação atual da janela do tray, crie a sessão pelo endpoint local, mantendo `10.0.2.2` como nome TLS e redirecionando somente a conexão administrativa para loopback:
-
-```powershell
-$ca = Join-Path $env:LOCALAPPDATA 'AndroidStreamDeck\tls\ca-cert.pem'
-$admin = Read-Host "Código administrativo"
-$header = "X-StreamDeck-Admin-Code: $admin"
-$pairing = $header | curl.exe --silent --show-error --cacert $ca `
-  --resolve '10.0.2.2:8765:127.0.0.1' `
-  --header '@-' `
-  -X POST 'https://10.0.2.2:8765/api/v1/local/pairing-session' | ConvertFrom-Json
-$pairing | Select-Object server_ip, port, pairing_code, qr_uri
-```
-
-Use no Android o `server_ip` e o `pairing_code` exibidos, ou o `qr_uri` quando o aplicativo oferecer leitura manual. A porta `8765` permanece a configuração interna do aplicativo. O parâmetro `--resolve` afeta apenas essa chamada local; o certificado continua sendo validado para `10.0.2.2`. O header é enviado pelo stdin do `curl.exe`, para não colocar o código administrativo na linha de comando.
+Esse wildcard é uma exceção exclusiva do emulador, porque `10.0.2.2` é o endereço virtual fornecido pelo Android Emulator. Para um celular físico, não use wildcard: configure o IPv4 RFC1918 concreto no fluxo abaixo. O tray só abre o pareamento quando consegue alcançar o servidor por loopback; binds por hostname arbitrário não são aceitos para esse fluxo.
 
 ## Uso com celular na rede privada
 
 O computador e o telefone devem estar na mesma rede privada. Use o IPv4 privado real do Windows — por exemplo, `192.168.1.50` — e substitua o exemplo abaixo pelo endereço que sua máquina realmente possui. Não use um IP público, não encaminhe a porta no roteador e não exponha o servidor à internet.
 
-Em uma janela do **PowerShell**, configure o bind remoto e o TLS antes de iniciar o tray ou o servidor:
+Em uma janela do **PowerShell**, configure o IPv4 privado concreto e o TLS antes de iniciar o tray ou o servidor:
 
 ```powershell
-$env:STREAMDECK_HOST = "0.0.0.0"
+$env:STREAMDECK_HOST = "192.168.1.50"
 $env:STREAMDECK_PORT = "8765"
 $env:STREAMDECK_REQUIRE_AUTH = "true"
 $env:STREAMDECK_TLS_MODE = "required"
 $env:STREAMDECK_TLS_IDENTITIES = "192.168.1.50"
-$env:STREAMDECK_PAIRING_SERVER_IP = "192.168.1.50"
 $env:STREAMDECK_ADMIN_CODE = Read-Host "Código administrativo"
 .\streamdeck-tray.exe
 ```
 
 Se estiver executando a partir do checkout em vez do pacote, use `uv run --locked --no-sync streamdeck-tray` no lugar do executável. O código administrativo deve ter de 6 a 64 caracteres ASCII e não deve ser salvo no Git, em `.env`, em logs ou em uma captura de tela.
 
-O valor de `STREAMDECK_TLS_IDENTITIES` deve corresponder exatamente ao endereço digitado no Android. O certificado precisa conter esse endereço no SAN. Depois de configurar, verifique a saúde remota em `https://<IP privado>:8765/health`. Como o servidor usa uma CA privada local, um navegador comum não confiará nela automaticamente. Não ignore o alerta nem desative a validação TLS: importe somente a CA pública `ca-cert.pem` como autoridade confiável no Windows, ou use o arquivo diretamente com `curl.exe`:
+O valor de `STREAMDECK_TLS_IDENTITIES` deve corresponder exatamente ao endereço digitado no Android. O certificado precisa conter esse endereço no SAN. Para um bind IPv4 concreto, o endereço anunciado é sempre o próprio `STREAMDECK_HOST`; `STREAMDECK_PAIRING_SERVER_IP` só é necessário na exceção wildcard do emulador. Depois de configurar, verifique a saúde remota em `https://<IP privado>:8765/health`. Como o servidor usa uma CA privada local, um navegador comum não confiará nela automaticamente. Não ignore o alerta nem desative a validação TLS: importe somente a CA pública `ca-cert.pem` como autoridade confiável no Windows, ou use o arquivo diretamente com `curl.exe`:
 
 ```powershell
 $ca = Join-Path $env:LOCALAPPDATA 'AndroidStreamDeck\tls\ca-cert.pem'
@@ -186,18 +172,12 @@ curl.exe --cacert $ca https://192.168.1.50:8765/health
 
 Mantenha `192.168.1.50` como exemplo apenas; substitua pelo IP real e confirme que ele aparece no SAN do certificado.
 
-Com o tray iniciado, a sessão pode ser criada manualmente enquanto a limitação da janela de pareamento não for corrigida:
-
-```powershell
-$header = "X-StreamDeck-Admin-Code: $admin"
-$pairing = $header | curl.exe --silent --show-error --cacert $ca `
-  --resolve '192.168.1.50:8765:127.0.0.1' `
-  --header '@-' `
-  -X POST 'https://192.168.1.50:8765/api/v1/local/pairing-session' | ConvertFrom-Json
-$pairing | Select-Object server_ip, port, pairing_code, qr_uri
-```
-
-Substitua o IP pelo endereço real. No Android, use os dados exibidos para concluir o pareamento manual.
+Quando `STREAMDECK_HOST` é um IPv4 RFC1918 concreto, o runner abre dois sockets
+explícitos na mesma porta: um nesse IPv4 para o Android e outro em `127.0.0.1`
+para o canal administrativo. Ele não amplia esse bind para outras interfaces.
+Com o tray iniciado, escolha **Parear dispositivo**; no Android, use a senha
+exibida ou leia o QR. A rota administrativa continua rejeitando origens da rede
+com `403 LOCAL_ONLY`.
 
 ### Firewall do Windows
 
@@ -240,7 +220,7 @@ Detalhes dos contratos, da autenticação e das fronteiras de segurança estão 
 - Play/Pause, próxima, mute e volume dependem dos dispositivos, da sessão de mídia e do estado do Windows.
 - Chrome depende de estar disponível no computador hospedeiro.
 - Os smokes automatizados não substituem a validação de efeitos na sessão Windows real. A matriz atual de evidências está resumida em [Status atual](#status-atual).
-- A janela de pareamento do tray ainda não foi validada ponta a ponta no bind privado; a rota local rejeita origens não-loopback com `403 LOCAL_ONLY`. O workaround manual documentado acima mantém a chamada administrativa em loopback.
+- A rota que cria sessões permanece restrita a loopback (`LOCAL_ONLY`); o tray usa esse canal local e apresenta separadamente o endereço privado ao Android.
 - A validação registrada foi feita no emulador `Pixel_8`; o Galaxy A10 físico ainda não foi conectado e não foi validado.
 
 ## Desenvolvimento
@@ -367,7 +347,7 @@ Não adicione ao Git:
 | Validação registrada | Gates de servidor, build Android, pacote e E2E HTTPS/WSS no `Pixel_8` estão registrados nos relatórios técnicos. |
 | Efeitos Windows observados | Em uma sessão Windows real, volume +/−, mute, foco/execução do Chrome e Print Screen no clipboard foram confirmados. |
 | Efeitos de mídia | Play/Pause, Próxima e Spotify foram despachados pelo protocolo, mas a semântica não foi confirmada porque não havia sessão de mídia global ativa. |
-| Pareamento pelo tray | A sessão segura e o protocolo foram validados no harness; a janela do tray no bind privado permanece pendente por causa da restrição `LOCAL_ONLY`. |
+| Pareamento pelo tray | A janela cria a sessão pelo canal TLS de loopback e apresenta o endereço privado ao Android; origens de rede continuam bloqueadas por `LOCAL_ONLY`. |
 | Validação ainda pendente | Leitura óptica física do QR, validação no Galaxy A10 físico e confirmação semântica das ações de mídia. |
 | Entrega ainda pendente | Keystore autorizado para assinar o APK release e distribuição pública verificável. |
 

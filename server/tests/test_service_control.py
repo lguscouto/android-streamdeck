@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
+import app.service_control as service_control
 from app.config import Settings
 from app.service_control import (
     ProcessStatus,
@@ -13,6 +15,7 @@ from app.service_control import (
 
 class FakeProcess:
     def __init__(self, *, running: bool = True) -> None:
+        self.pid = 43210
         self.returncode = None if running else 0
         self.terminate_calls = 0
         self.kill_calls = 0
@@ -108,12 +111,16 @@ def test_controller_starts_once_with_sanitized_fixed_environment() -> None:
     )
 
 
-def test_controller_stop_is_idempotent_and_terminates_owned_process() -> None:
+def test_controller_stop_is_idempotent_and_terminates_owned_process(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(service_control.os, "name", "posix")
     process = FakeProcess()
 
     controller = ServerProcessController(
         Settings(),
         command=("server.exe",),
+        cwd="C:/bundle",
         process_factory=lambda *_args, **_kwargs: process,
     )
 
@@ -124,6 +131,98 @@ def test_controller_stop_is_idempotent_and_terminates_owned_process() -> None:
     assert process.kill_calls == 0
     assert controller.status is ProcessStatus.STOPPED
     assert controller.stop() is False
+
+
+def test_controller_stops_the_owned_process_tree_on_windows(monkeypatch) -> None:
+    process = FakeProcess()
+    taskkill_calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> None:
+        taskkill_calls.append((command, kwargs))
+        process.returncode = 0
+
+    monkeypatch.setattr(service_control.os, "name", "nt")
+    monkeypatch.setattr(service_control.subprocess, "run", fake_run)
+    controller = ServerProcessController(
+        Settings(),
+        command=("server.exe",),
+        cwd="C:/bundle",
+        process_factory=lambda *_args, **_kwargs: process,
+    )
+
+    assert controller.start() is True
+    assert controller.stop() is True
+
+    assert taskkill_calls == [
+        (
+            [r"C:\Windows\System32\taskkill.exe", "/PID", "43210", "/T", "/F"],
+            {
+                "check": False,
+                "stdout": service_control.subprocess.DEVNULL,
+                "stderr": service_control.subprocess.DEVNULL,
+            },
+        )
+    ]
+    assert process.terminate_calls == 0
+
+
+def test_controller_does_not_taskkill_an_already_exited_process(monkeypatch) -> None:
+    process = FakeProcess(running=False)
+    taskkill_calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> None:
+        taskkill_calls.append((command, kwargs))
+
+    monkeypatch.setattr(service_control.os, "name", "nt")
+    monkeypatch.setattr(service_control.subprocess, "run", fake_run)
+    controller = ServerProcessController(
+        Settings(),
+        command=("server.exe",),
+        cwd="C:/bundle",
+        process_factory=lambda *_args, **_kwargs: process,
+    )
+
+    assert controller.start() is True
+    assert controller.status is ProcessStatus.STOPPED
+    assert controller.stop() is False
+    assert taskkill_calls == []
+
+
+def test_controller_start_is_single_flight_under_concurrency() -> None:
+    processes: list[FakeProcess] = []
+    first_factory_call = threading.Event()
+    release_factory = threading.Event()
+
+    def fake_popen(_command: tuple[str, ...], **_kwargs: Any) -> FakeProcess:
+        first_factory_call.set()
+        assert release_factory.wait(timeout=2)
+        process = FakeProcess()
+        processes.append(process)
+        return process
+
+    controller = ServerProcessController(
+        Settings(),
+        command=("server.exe",),
+        process_factory=fake_popen,
+    )
+    results: list[bool] = []
+
+    def start_controller() -> None:
+        results.append(controller.start())
+
+    first = threading.Thread(target=start_controller)
+    second = threading.Thread(target=start_controller)
+    first.start()
+    assert first_factory_call.wait(timeout=2)
+    second.start()
+    release_factory.set()
+    first.join(timeout=2)
+    second.join(timeout=2)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert sorted(results) == [False, True]
+    assert len(processes) == 1
 
 
 def test_controller_generates_internal_admin_code_for_child_without_static_code() -> (
